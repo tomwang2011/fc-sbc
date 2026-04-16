@@ -1,228 +1,262 @@
-/**
- * Milestone 6: Hybrid Solver Console Script (V4 - Search Fix)
- */
+(async function milestone6HybridSolverV16() {
+    const win = (typeof unsafeWindow !== 'undefined' ? unsafeWindow : window);
+    const repo = win.repositories.Item;
+    
+    console.log("%c--- 🔋 MILESTONE 6: HYBRID STORAGE-AWARE SOLVER (V16) ---", "font-size: 16px; font-weight: bold; color: #6366f1;");
 
-(async () => {
-    const win = window;
-    console.log("%c[FC-SBC] Milestone 6 Hybrid Solver Initializing...", "color: #6366f1; font-weight: bold;");
-
-    const SbcBuilder = {
-        _players: [],
-
-        getSbcContext() {
-            try {
-                const root = win.getAppMain().getRootViewController();
-                const findController = (node) => {
-                    if (!node) return null;
-                    if (node._squad && node._challenge) return node;
-                    const children = [
-                        ...(node.childViewControllers || []),
-                        ...(node.presentedViewController ? [node.presentedViewController] : []),
-                        ...(node.currentController ? [node.currentController] : []),
-                        ...(node._viewControllers || [])
-                    ];
-                    for (const child of children) {
-                        const found = findController(child);
-                        if (found) return found;
-                    }
-                    return null;
-                };
-                const controller = findController(root);
-                return controller ? { challenge: controller._challenge, squad: controller._squad, controller } : null;
-            } catch (e) { return null; }
-        },
-
-        async targetedSearch(minRating, maxRating) {
-            return new Promise(resolve => {
-                const searchCriteria = new win.UTSearchCriteriaDTO();
-                // Using Milestone 4 pattern: Object.assign + level: 'gold'
-                // Property names in DTO are minRating/maxRating
-                Object.assign(searchCriteria, { 
-                    type: 'player', 
-                    count: 250, 
-                    level: 'gold', 
-                    minRating: minRating, 
-                    maxRating: maxRating 
-                });
-                
-                win.services.Club.search(searchCriteria).observe({name:`search_${minRating}_${maxRating}`}, (obs, res) => {
-                    const items = res.response?.items || res.items || [];
-                    console.log(`[SEARCH] Club ${minRating}-${maxRating} OVR: Found ${items.length} players.`);
-                    resolve(items);
-                });
-            });
-        },
-
-        async primeInventory() {
-            const repo = win.repositories.Item;
-            if (!repo) return { total: 0 };
-
-            console.log("[FC-SBC] Syncing Storage & Club...");
-            
-            const storageCriteria = new win.UTSearchCriteriaDTO();
-            storageCriteria.type = 'player';
-
-            const searchPromises = [
-                // 1. Storage Search
-                new Promise(resolve => {
-                    if (win.services.Item.searchStorageItems) {
-                        win.services.Item.searchStorageItems(storageCriteria).observe({name:'storage_search'}, (obs, res) => {
-                            const items = res.response?.items || res.items || [];
-                            console.log(`[SEARCH] Storage: Found ${items.length} players.`);
-                            resolve({ type: 'sbcstorage', items });
-                        });
-                    } else { resolve({ type: 'sbcstorage', items: [] }); }
-                }),
-                // 2. Unassigned
-                Promise.resolve({ type: 'unassigned', items: repo.unassigned?._collection || repo.unassigned || [] }),
-                // 3. Multi-Pass Club Search (Milestone 4 Strategy)
-                this.targetedSearch(75, 79).then(items => ({ type: 'club', items })),
-                this.targetedSearch(80, 82).then(items => ({ type: 'club', items })),
-                this.targetedSearch(83, 84).then(items => ({ type: 'club', items })),
-                this.targetedSearch(85, 87).then(items => ({ type: 'club', items }))
-            ];
-
-            const results = await Promise.all(searchPromises);
-            
-            const allPlayers = new Map();
-            const priorities = { 'sbcstorage': 0, 'unassigned': 1, 'club': 2 };
-
-            results.forEach(res => {
-                const items = Array.isArray(res.items) ? res.items : Object.values(res.items || {});
-                items.forEach(p => {
-                    if (p && p.id && (p.type === 'player' || (typeof p.isPlayer === 'function' && p.isPlayer()))) {
-                        // Keep highest priority source
-                        const priority = priorities[res.type] ?? 2;
-                        if (!allPlayers.has(p.id) || priority < allPlayers.get(p.id)._sourcePriority) {
-                            p.itemType = res.type;
-                            p._sourcePriority = priority;
-                            allPlayers.set(p.id, p);
-                        }
-                    }
-                });
-            });
-
-            this._players = Array.from(allPlayers.values());
-            console.log(`[FC-SBC] Total Pooled Players (Pre-Filter): ${this._players.length}`);
-            return { total: this._players.length };
-        },
-
-        calculateSquadRating(players) {
-            const active = players.filter(p => p !== null);
-            if (active.length < 11) return 0;
-            const ratings = active.map(p => p.rating);
-            const sum = ratings.reduce((a, b) => a + b, 0);
-            const avg = sum / 11;
-            let cf = 0;
-            ratings.forEach(r => { if (r > avg) cf += (r - avg); });
-            return Math.floor((sum + cf) / 11 + 0.0401);
-        },
-
-        async solve() {
-            const context = this.getSbcContext();
-            if (!context) return console.error("[FC-SBC] Error: Navigate to SBC screen first.");
-
-            const { challenge, squad, controller } = context;
-            const activeSlots = squad.getSBCSlots().filter(s => !s.isBrick() && s.index <= 10);
-            const targetRating = 84;
-
-            await this.primeInventory();
-
-            // Refined Filtering
-            const pool = this._players.filter(p => {
-                const isLoan = (typeof p.isLoanItem === 'function' && p.isLoanItem()) || (p.loan > 0) || p.limitedUseType === 2;
-                const isEvo = (typeof p.isEvo === 'function' && p.isEvo()) || !!p.evolutionInfo || p.rareflag === 116;
-                if (isLoan || isEvo) return false;
-
-                // PROTECTION: No Storage > 85
-                if (p.itemType === 'sbcstorage' && p.rating > 85) return false;
-                
-                // PROTECTION: No Club > 85 unless TOTW
-                const isTotw = p.rarityId === 3;
-                if (p.itemType === 'club' && p.rating > 85 && !isTotw) return false;
-
-                // Gold Only (75+)
-                const isGold = p.rating >= 75 && (p.quality === 2 || p.quality === 3 || p.rareflag <= 3);
-                return isGold || isTotw;
-            });
-
-            const sortedPool = [...pool].sort((a, b) => {
-                if (a.rating !== b.rating) return a.rating - b.rating;
-                return a._sourcePriority - b._sourcePriority;
-            });
-
-            console.log(`[FC-SBC] Filtered Pool Size: ${sortedPool.length}`);
-
-            const selected = new Array(11).fill(null);
-            const usedDefIds = new Set();
-
-            // 1. Mandatory TOTW
-            const totw = sortedPool.find(p => p.rarityId === 3); 
-            if (totw) {
-                selected[0] = { item: totw, type: 'MANDATORY' };
-                usedDefIds.add(totw.definitionId);
-                console.log(`[PASS 1] Using TOTW: ${totw._staticData?.name} (${totw.rating}) from ${totw.itemType}`);
-            }
-
-            // 2. Initial Fill (Lowest rated)
-            activeSlots.forEach((slot, i) => {
-                if (selected[i]) return;
-                const match = sortedPool.find(p => !usedDefIds.has(p.definitionId));
-                if (match) {
-                    selected[i] = { item: match, type: 'FILLER' };
-                    usedDefIds.add(match.definitionId);
-                }
-            });
-
-            // 3. BFS Rating Optimization
-            let attempts = 0;
-            let currentRating = this.calculateSquadRating(selected.map(s => s?.item));
-            console.log(`[BFS] Starting Rating: ${currentRating}`);
-
-            while (currentRating < targetRating && attempts < 500) {
-                attempts++;
-                const fillers = selected.map((s, idx) => s?.type === 'FILLER' ? idx : -1).filter(i => i !== -1);
-                if (fillers.length === 0) break;
-
-                const minRatingInSquad = Math.min(...fillers.map(i => selected[i].item.rating));
-                const upgradeIdx = fillers.find(i => selected[i].item.rating === minRatingInSquad);
-                
-                const currentItem = selected[upgradeIdx].item;
-                const nextBest = sortedPool.find(p => !usedDefIds.has(p.definitionId) && p.rating > currentItem.rating);
-
-                if (nextBest) {
-                    usedDefIds.delete(currentItem.definitionId);
-                    selected[upgradeIdx] = { item: nextBest, type: 'FILLER' };
-                    usedDefIds.add(nextBest.definitionId);
-                    currentRating = this.calculateSquadRating(selected.map(s => s?.item));
-                } else {
-                    console.warn(`[BFS] Stuck at ${currentRating}. No upgrade for ${currentItem.rating} found.`);
-                    break;
-                }
-            }
-
-            console.log(`[FINAL] Success: ${currentRating} OVR | Steps: ${attempts}`);
-
-            // Apply to UI
-            const finalPlayers = new Array(23).fill(null);
-            activeSlots.forEach((slot, i) => {
-                if (selected[i]) finalPlayers[slot.index] = selected[i].item;
-            });
-
-            squad.setPlayers(finalPlayers);
-            squad.onDataUpdated.notify();
-            
-            if (controller._pushSquadToView) controller._pushSquadToView(squad);
-            else if (controller._overviewController?._pushSquadToView) controller._overviewController._pushSquadToView(squad);
-
-            if (!challenge.squad) challenge.squad = squad;
-            win.services.SBC.saveChallenge(challenge).observe({name: 'save'}, (obs, res) => {
-                console.log(`[SERVER] Save: ${res.success ? 'SUCCESS' : 'FAILED'}`);
-            });
-
-            alert(`SBC Solved! Rating: ${currentRating}`);
+    // 1. Context Detection
+    const getSbcContext = (n) => {
+        if (!n) return null;
+        const challenge = n._challenge || (n._overviewController?._challenge) || (n._parentViewController?._challenge);
+        const squad = n._squad || (n._squadController?._squad);
+        if (challenge && squad) return { challenge, squad, controller: n };
+        const children = [...(n.childViewControllers || []), ...(n.presentedViewController ? [n.presentedViewController] : []), ...(n.currentController ? [n.currentController] : []), ...(n._viewControllers || [])];
+        for (const c of children) {
+            const f = getSbcContext(c);
+            if (f) return f;
         }
+        return null;
     };
 
-    await SbcBuilder.solve();
+    const ctx = getSbcContext(win.getAppMain().getRootViewController());
+    if (!ctx) return console.error("❌ SBC screen not detected.");
+    const { challenge, squad, controller } = ctx;
+
+    const requirements = (challenge.eligibilityRequirements || []).map((req) => {
+        const col = req.kvPairs._collection || req.kvPairs;
+        const rules = [];
+        for (let key in col) {
+            const val = col[key];
+            const cleanValue = Array.isArray(val) 
+                ? val.map(v => (v && v.value !== undefined ? v.value : v)) 
+                : (val && val.value !== undefined ? val.value : val);
+            rules.push({ key: parseInt(key), value: cleanValue });
+        }
+        return { rules, count: req.count, description: req.requirementLabel || "General" };
+    });
+
+    console.log("[SOLVER] Analyzing Requirements...");
+    requirements.forEach(r => {
+        console.log(`[REQ] ${r.description} | Count: ${r.count}`);
+        r.rules.forEach(rule => console.log(`   - Rule Key: ${rule.key} | Value: ${rule.value}`));
+    });
+
+    const ratingReq = requirements.find(r => r.rules.some(rule => rule.key === 19));
+    const targetRating = ratingReq ? (Array.isArray(ratingReq.rules.find(r => r.key === 19).value) ? ratingReq.rules.find(r => r.key === 19).value[0] : ratingReq.rules.find(r => r.key === 19).value) : 84;
+    
+    const chemReq = requirements.find(r => r.rules.some(rule => rule.key === 14));
+    const targetChem = chemReq ? (Array.isArray(chemReq.rules.find(r => r.key === 14).value) ? chemReq.rules.find(r => r.key === 14).value[0] : chemReq.rules.find(r => r.key === 14).value) : 0;
+
+    const ratingFloor = targetRating - 5; 
+
+    // 2. Inventory Sync
+    const primeInventory = async () => {
+        console.log("[STORAGE] Syncing Club + Storage...");
+        const fetch = (service, method, criteria) => new Promise(r => {
+            if (!service || !service[method]) return r([]);
+            service[method](criteria).observe({name:'fetch'}, (obs, res) => r(res.response?.items || res.items || []));
+        });
+
+        const storageCriteria = new win.UTSearchCriteriaDTO();
+        storageCriteria.type = 'player';
+        storageCriteria.count = 250;
+        const clubCriteria = new win.UTSearchCriteriaDTO();
+        clubCriteria.type = 'player';
+        clubCriteria.count = 1000;
+        clubCriteria.level = 'gold';
+
+        const [sItems, cItems] = await Promise.all([
+            fetch(win.services.Item, 'searchStorageItems', storageCriteria),
+            fetch(win.services.Club, 'search', clubCriteria)
+        ]);
+
+        const allPlayers = [];
+        const processedIds = new Set();
+        const add = (source, type) => {
+            if (!source) return;
+            let raw = source._collection || source.items || source;
+            let items = Array.isArray(raw) ? raw : (typeof raw === 'object' ? Object.values(raw) : []);
+            items.forEach(p => {
+                if (p && p.id && !processedIds.has(p.id)) {
+                    const isLoan = (typeof p.isLoanItem === 'function' && p.isLoanItem()) || (p.loan && p.loan > 0) || p.limitedUseType === 2;
+                    const isEvo = (typeof p.isEvo === 'function' && p.isEvo()) || !!p.evolutionInfo || p.rareflag === 116;
+                    if (!isLoan && !isEvo) {
+                        p._sourceType = type;
+                        p._sourcePriority = (type === 'storage' && p.rating < 83) ? 0 : (type === 'unassigned' ? 1 : (type === 'club' ? 2 : 3));
+                        p._personaId = Number(p.definitionId) % 16777216;
+                        allPlayers.push(p);
+                        processedIds.add(p.id);
+                    }
+                }
+            });
+        };
+        add(sItems, 'storage');
+        add(repo.unassigned?._collection || repo.unassigned || [], 'unassigned');
+        add(cItems, 'club');
+        add(repo.getClub?.()?.items || repo.getClub?.(), 'club');
+        add(repo.getStorage?.()?.items || repo.getStorage?.() || repo.getSbcStorageItems?.(), 'storage');
+        return allPlayers;
+    };
+
+    const fullPool = await primeInventory();
+
+    // 3. Robust Filter with Persona Deduplication
+    const getFilteredPool = (criteria, excludePersonaIds = new Set()) => {
+        const pool = fullPool.filter(p => {
+            if (excludePersonaIds.has(p._personaId)) return false;
+            const isTotw = p.rarityId === 3 || p.rareflag === 3;
+            const isBasicGold = (p.rareflag <= 1) && p.rating >= 75;
+            const isRequiredRarity = criteria.rarities && (Array.isArray(criteria.rarities) ? criteria.rarities : [criteria.rarities]).includes(p.rarityId);
+            if (!isBasicGold && !isRequiredRarity && !isTotw) return false;
+            
+            if (criteria.leagues && criteria.leagues.length > 0 && !criteria.leagues.includes(p.leagueId)) return false;
+            if (criteria.nations && criteria.nations.length > 0 && !criteria.nations.includes(p.nationId)) return false;
+            if (p.rating < (criteria.ovrMin || ratingFloor)) return false;
+            return true;
+        }).sort((a, b) => (a._sourcePriority - b._sourcePriority) || (a.rating - b.rating));
+
+        const distinct = [];
+        const seen = new Set(excludePersonaIds);
+        for (const p of pool) {
+            if (!seen.has(p._personaId)) {
+                distinct.push(p);
+                seen.add(p._personaId);
+            }
+        }
+        return distinct;
+    };
+
+    const usedPersonaIds = new Set();
+    const activeSlots = squad.getSBCSlots().filter(s => !s.isBrick() && s.index <= 10);
+    const selected = new Array(activeSlots.length).fill(null);
+
+    // 4. Strategic Assignment
+    const sortedReqs = requirements.filter(r => r.count > 0).sort((a, b) => a.count - b.count);
+    const detectedLeagues = new Set();
+    const detectedNations = new Set();
+
+    sortedReqs.forEach(req => {
+        const criteria = { leagues: [], nations: [], rarities: [] };
+        req.rules.forEach(rule => {
+            if (rule.key === 11) { 
+                const val = Array.isArray(rule.value) ? rule.value : [rule.value];
+                criteria.leagues = val;
+                val.forEach(l => detectedLeagues.add(l));
+            }
+            if (rule.key === 12) {
+                const val = Array.isArray(rule.value) ? rule.value : [rule.value];
+                criteria.nations = val;
+                val.forEach(n => detectedNations.add(n));
+            }
+            if (rule.key === 18 && (rule.value === 3 || (Array.isArray(rule.value) && rule.value.includes(3)))) criteria.rarities = [3];
+        });
+
+        const pool = getFilteredPool(criteria, usedPersonaIds);
+        let countFilled = 0;
+        
+        for (let i = 0; i < activeSlots.length; i++) {
+            if (selected[i] || countFilled >= req.count) continue;
+            const slot = activeSlots[i];
+            const targetPos = (slot.position?.id || slot._position);
+            const matchIdx = pool.findIndex(p => (p.preferredPosition === targetPos || (({ 2: 3, 8: 7, 4: 5, 6: 5, 9: 10, 11: 10, 13: 14, 15: 14, 17: 18, 19: 18, 20: 21, 22: 21, 24: 25, 26: 25 }[p.preferredPosition]) || p.preferredPosition) === targetPos));
+            
+            if (matchIdx !== -1) {
+                const match = pool[matchIdx];
+                selected[i] = { item: match, type: 'MANDATORY' };
+                usedPersonaIds.add(match._personaId);
+                pool.splice(matchIdx, 1);
+                countFilled++;
+            }
+        }
+
+        for (let i = 0; i < activeSlots.length; i++) {
+            if (selected[i] || countFilled >= req.count) continue;
+            const match = pool.shift();
+            if (match) {
+                selected[i] = { item: match, type: 'MANDATORY' };
+                usedPersonaIds.add(match._personaId);
+                countFilled++;
+            }
+        }
+    });
+
+    // Filler Pass (Homogeneity Aware)
+    activeSlots.forEach((slot, i) => {
+        if (selected[i]) return;
+        const targetLeagues = Array.from(detectedLeagues);
+        const pool = getFilteredPool({ leagues: targetLeagues }, usedPersonaIds);
+        const match = pool.shift();
+        if (match) {
+            selected[i] = { item: match, type: 'FILLER' };
+            usedPersonaIds.add(match._personaId);
+        } else {
+            const anyPool = getFilteredPool({}, usedPersonaIds);
+            const anyMatch = anyPool.shift();
+            if (anyMatch) {
+                selected[i] = { item: anyMatch, type: 'FILLER' };
+                usedPersonaIds.add(anyMatch._personaId);
+            }
+        }
+    });
+
+    // 5. Rating & Chem Optimization
+    const calculateLocalRating = (items) => {
+        const ratings = items.map(s => s?.item?.rating || 0);
+        const sum = ratings.reduce((a, b) => a + b, 0);
+        const avg = sum / 11;
+        let cf = 0;
+        ratings.forEach(r => { if (r > avg) cf += (r - avg); });
+        return Math.floor((sum + cf) / 11 + 0.0401);
+    };
+
+    const upgradePool = fullPool.filter(p => (p.rareflag <= 1 || p.rarityId === 3)).sort((a, b) => (a._sourcePriority - b._sourcePriority) || (a.rating - b.rating));
+    
+    let attempts = 0;
+    while (attempts < 500) {
+        attempts++;
+        const currentPlayers = new Array(23).fill(null);
+        activeSlots.forEach((slot, i) => { if (selected[i]) currentPlayers[slot.index] = selected[i].item; });
+        squad.setPlayers(currentPlayers);
+        
+        const rating = calculateLocalRating(selected);
+        const chem = squad.getChemistry() || 0;
+        if (rating >= targetRating && (targetChem <= 0 || chem >= targetChem)) break;
+
+        const fillerIdxs = selected.map((s, i) => s?.type === 'FILLER' ? i : -1).filter(i => i !== -1);
+        if (fillerIdxs.length === 0) break;
+        const minR = Math.min(...fillerIdxs.map(i => selected[i].item.rating));
+        const upIdx = fillerIdxs.find(i => selected[i].item.rating === minR);
+        
+        let upgrade = null;
+        if (targetChem > 0 && chem < targetChem) {
+            const targetLeagues = Array.from(detectedLeagues);
+            upgrade = upgradePool.find(p => !usedPersonaIds.has(p._personaId) && targetLeagues.includes(p.leagueId) && p.rating >= selected[upIdx].item.rating);
+        }
+        if (!upgrade) {
+            upgrade = upgradePool.find(p => !usedPersonaIds.has(p._personaId) && p.rating > selected[upIdx].item.rating);
+        }
+
+        if (upgrade) { 
+            usedPersonaIds.delete(selected[upIdx].item._personaId);
+            selected[upIdx] = { item: upgrade, type: 'FILLER' };
+            usedPersonaIds.add(upgrade._personaId);
+        } else break;
+    }
+
+    // 6. Applying
+    console.log(`[SOLVER] Final Rating: ${calculateLocalRating(selected)} | Chem: ${squad.getChemistry()}`);
+    activeSlots.forEach((slot, i) => { 
+        if (selected[i]) console.log(`   - Slot ${slot.index}: ${selected[i].item.rating} OVR (${selected[i].item._staticData?.name}) [Persona: ${selected[i].item._personaId}] from ${selected[i].item._sourceType}`);
+    });
+
+    squad.onDataUpdated.notify();
+    if (controller._pushSquadToView) controller._pushSquadToView(squad);
+    else if (controller._overviewController?._pushSquadToView) controller._overviewController._pushSquadToView(squad);
+
+    setTimeout(() => {
+        const r = squad.getRating ? squad.getRating() : '??';
+        const c = squad.getChemistry ? squad.getChemistry() : '??';
+        const v = squad.isValid ? squad.isValid() : '??';
+        console.log(`%c[SBC TOOL] Internal Rating: ${r} | Chem: ${c} | Valid: ${v}`, "font-weight: bold; color: #e67e22;");
+    }, 1000);
 })();
