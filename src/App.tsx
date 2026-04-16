@@ -11,15 +11,12 @@ export function App() {
     try {
       // Use a small timeout to allow UI update before heavy scan
       await new Promise(r => setTimeout(r, 100));
-      const players = SbcBuilder.getAllAvailablePlayers();
+      const res = await SbcBuilder.primeInventory();
       
-      const sbcStorageCount = players.filter(p => (p as any).isStorage || (p as any)._isStorage || (p as any).itemType === 'sbcstorage').length;
-      const unassignedCount = players.filter(p => p.unassigned).length;
-
       setStats({
-        total: players.length,
-        sbcStorage: sbcStorageCount,
-        unassigned: unassignedCount
+        total: res.total,
+        sbcStorage: res.storage,
+        unassigned: res.unassigned
       });
     } catch (e: any) {
       console.error('[FC-SBC] Scan error:', e.message);

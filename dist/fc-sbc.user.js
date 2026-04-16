@@ -428,96 +428,194 @@
     return "function" == typeof t2 ? t2(n2) : t2;
   }
   class SbcBuilder {
+    static _clubPlayersMemory = [];
 static getSbcContext() {
       const win = typeof unsafeWindow !== "undefined" ? unsafeWindow : window;
       try {
         const root = win.getAppMain().getRootViewController();
-        const controller = root.childViewControllers[0].childViewControllers[5].currentController;
-        if (controller && controller.className === "UTSBCSquadSplitViewController") {
-          const overview = controller._overviewController;
-          const challenge = overview?._challenge || overview?.challenge;
-          const squad = controller._squad;
-          if (challenge && squad) return { challenge, squad, controller };
+        const findController = (node) => {
+          if (!node) return null;
+          if (node.className && (node.className.includes("SBCSquad") || node.className.includes("SplitView"))) return node;
+          const children = [
+            ...node.childViewControllers || [],
+            ...node.presentedViewController ? [node.presentedViewController] : [],
+            ...node.currentController ? [node.currentController] : [],
+            ...node._viewControllers || []
+          ];
+          for (const child of children) {
+            const found = findController(child);
+            if (found) return found;
+          }
+          return null;
+        };
+        const controller = findController(root);
+        if (controller) {
+          const squad = controller._squad || (controller._squadController ? controller._squadController._squad : null);
+          let challenge = controller._challenge || (controller._overviewController ? controller._overviewController._challenge : null) || (controller._parentViewController ? controller._parentViewController._challenge : null);
+          if (squad && challenge) return { challenge, squad, controller };
         }
       } catch (e2) {
       }
       return null;
     }
+static async primeInventory() {
+      const win = typeof unsafeWindow !== "undefined" ? unsafeWindow : window;
+      const repo = win.repositories.Item;
+      if (!repo) return { total: 0, storage: 0, unassigned: 0 };
+      console.log("[FC-SBC] Priming EA Repository...");
+      const criteria = new win.UTSearchCriteriaDTO();
+      criteria.type = "player";
+      criteria.level = "gold";
+      criteria.count = 250;
+      await new Promise((r2) => {
+        win.services.Club.search(criteria).observe(this, () => r2());
+      });
+      const allPlayers = new Map();
+      let storageCount = 0;
+      let unassignedCount = 0;
+      const addEntities = (source, isSafe = false, isStorage = false, isUnassigned = false) => {
+        if (!source) return;
+        const raw = source._collection || source.items || (Array.isArray(source) ? source : []);
+        const items = Array.isArray(raw) ? raw : Object.values(raw);
+        items.forEach((p2) => {
+          if (p2 && p2.id && (p2.type === "player" || typeof p2.isPlayer === "function" && p2.isPlayer())) {
+            p2._isSafeSource = isSafe;
+            if (isStorage) storageCount++;
+            if (isUnassigned) unassignedCount++;
+            allPlayers.set(p2.id, p2);
+          }
+        });
+      };
+      addEntities(repo.unassigned, true, false, true);
+      addEntities(repo.getStorage()?.items, true, true, false);
+      addEntities(repo.getClub()?.items, false, false, false);
+      this._clubPlayersMemory = Array.from(allPlayers.values());
+      console.log(`[FC-SBC] Sync Ready: ${this._clubPlayersMemory.length} players.`);
+      return { total: this._clubPlayersMemory.length, storage: storageCount, unassigned: unassignedCount };
+    }
+    static calculateSquadRating(players) {
+      const active = players.filter((p2) => p2 !== null);
+      if (active.length === 0) return 0;
+      const count = active.length;
+      const ratings = active.map((p2) => p2.rating);
+      const sum = ratings.reduce((a2, b2) => a2 + b2, 0);
+      const avg = sum / count;
+      let excess = 0;
+      ratings.forEach((r2) => {
+        if (r2 > avg) excess += r2 - avg;
+      });
+      const total = (sum + excess) / count;
+      return Math.floor(total + 0.04);
+    }
 static async solveSbc() {
       const context = this.getSbcContext();
-      if (!context) return alert("SBC Grid not detected.");
+      if (!context) return alert("SBC Squad screen not detected.");
       const { challenge, squad, controller } = context;
-      const overview = controller._overviewController;
+      const pitchSlots = squad.getSBCSlots().filter((s2) => !s2.isBrick());
       try {
-        let allPlayers = this.getAllAvailablePlayers();
-        const lowest = allPlayers.length > 0 ? Math.min(...allPlayers.map((p2) => p2.rating)) : 99;
-        if (lowest >= 70) {
-          console.log("[FC-SBC] No bronzes found in memory. Triggering auto-load...");
-          await this.forceLoadBronzes();
-          allPlayers = this.getAllAvailablePlayers();
-        }
-        const rarePlayers = allPlayers.filter((p2) => p2.rareflag > 0).sort((a2, b2) => a2.rating - b2.rating);
-        const commonPlayers = allPlayers.filter((p2) => !p2.rareflag || p2.rareflag === 0).sort((a2, b2) => a2.rating - b2.rating);
-        console.log(`[FC-SBC] Solving with ${rarePlayers.length} Rares and ${commonPlayers.length} Commons.`);
-        const slots = squad.getSBCSlots();
-        let raresAdded = 0;
-        let commonsAdded = 0;
-        for (const slot of slots) {
-          if (slot.index > 10 || slot.isBrick && slot.isBrick()) continue;
-          const item = typeof slot.getItem === "function" ? slot.getItem() : slot.item;
-          if (item && item.rating > 0) continue;
-          let player = null;
-          if (raresAdded < 3 && rarePlayers.length > raresAdded) {
-            player = rarePlayers[raresAdded++];
-          } else if (commonPlayers.length > commonsAdded) {
-            player = commonPlayers[commonsAdded++];
-          } else if (rarePlayers.length > raresAdded) {
-            player = rarePlayers[raresAdded++];
+        await this.primeInventory();
+        const pool = this._clubPlayersMemory.filter((p2) => {
+          const isLoan = typeof p2.isLoanItem === "function" && p2.isLoanItem() || p2.loan && p2.loan > 0;
+          const isEvo = typeof p2.isEvo === "function" && p2.isEvo() || !!p2.evolutionInfo || p2.rareflag === 116;
+          const isGold = p2.rating >= 75;
+          const isStandard = p2.subtype === 1;
+          if (p2._isSafeSource && isGold) return true;
+          return isGold && isStandard && !isLoan && !isEvo;
+        }).sort((a2, b2) => a2.rating - b2.rating);
+        console.log(`[FC-SBC] Solver Pool: ${pool.length} base golds.`);
+        const requirements = (challenge.eligibilityRequirements || []).map((req) => {
+          const col = req.kvPairs._collection || req.kvPairs;
+          const rules = [];
+          for (let key in col) {
+            const val = col[key];
+            const cleanValue = Array.isArray(val) ? val[0] : val && val.value !== void 0 ? val.value : val;
+            rules.push({ key: parseInt(key), value: cleanValue });
           }
-          if (player && slot.setItem) {
-            slot.setItem(player);
-            if (overview?.updateSlot) overview.updateSlot(slot);
+          return { rules, count: req.count };
+        });
+        const targetSquadRating = requirements.find((r2) => r2.count === -1 && r2.rules.some((rule) => rule.key === 19))?.rules.find((rule) => rule.key === 19)?.value || 0;
+        const squadWideRules = requirements.filter((req) => req.count === -1).flatMap((req) => req.rules).filter((r2) => r2.key !== 19);
+        const usedDefIds = new Set();
+        const selected = new Array(pitchSlots.length).fill(null);
+        const matchesRule = (player, rule) => {
+          switch (rule.key) {
+            case 3:
+              return player.quality === rule.value;
+            case 11:
+              return player.leagueId === rule.value;
+            case 12:
+              return player.nationId === rule.value;
+            case 13:
+              return player.teamId === rule.value;
+            case 25:
+              return rule.value === 4 ? player.rareflag > 0 : player.rareflag === 0;
+            case 18:
+              return player.rarityId === 3 || player.rareflag === 3;
+            case 19:
+              return player.rating >= rule.value;
+            default:
+              return true;
+          }
+        };
+        requirements.forEach((req) => {
+          if (req.count <= 0) return;
+          let satisfied = 0;
+          for (let i2 = 0; i2 < pool.length && satisfied < req.count; i2++) {
+            const p2 = pool[i2];
+            if (!usedDefIds.has(p2.definitionId) && req.rules.every((r2) => matchesRule(p2, r2))) {
+              const emptyIdx = selected.findIndex((s2) => s2 === null);
+              if (emptyIdx !== -1) {
+                selected[emptyIdx] = p2;
+                usedDefIds.add(p2.definitionId);
+                satisfied++;
+              }
+            }
+          }
+        });
+        const smartStartRating = targetSquadRating >= 84 ? 83 : targetSquadRating >= 78 ? 75 : 45;
+        for (let i2 = 0; i2 < selected.length; i2++) {
+          if (selected[i2]) continue;
+          let trash = pool.find((p2) => !usedDefIds.has(p2.definitionId) && p2.rating >= smartStartRating && squadWideRules.every((r2) => matchesRule(p2, r2))) || pool.find((p2) => !usedDefIds.has(p2.definitionId) && squadWideRules.every((r2) => matchesRule(p2, r2)));
+          if (trash) {
+            selected[i2] = trash;
+            usedDefIds.add(trash.definitionId);
           }
         }
-        if (squad.onDataUpdated?.notify) squad.onDataUpdated.notify();
-        if (overview?.viewDidAppear) overview.viewDidAppear();
-        alert("SBC Grid Populated Automatically!");
+        if (targetSquadRating > 0 && selected.every((s2) => s2 !== null)) {
+          let currentRating = this.calculateSquadRating(selected);
+          let attempts = 0;
+          while (currentRating < targetSquadRating && attempts < 500) {
+            attempts++;
+            const minIdx = selected.reduce((m2, p2, idx, arr) => p2.rating < arr[m2].rating ? idx : m2, 0);
+            const old = selected[minIdx];
+            const upgrade = pool.find((p2) => !usedDefIds.has(p2.definitionId) && p2.rating > old.rating && squadWideRules.every((r2) => matchesRule(p2, r2)));
+            if (upgrade) {
+              usedDefIds.delete(old.definitionId);
+              selected[minIdx] = upgrade;
+              usedDefIds.add(upgrade.definitionId);
+              currentRating = this.calculateSquadRating(selected);
+            } else break;
+          }
+        }
+        const newPlayers = new Array(23).fill(null);
+        selected.forEach((p2, i2) => {
+          if (p2 && pitchSlots[i2]) newPlayers[pitchSlots[i2].index] = p2;
+        });
+        squad.setPlayers(newPlayers);
+        squad.onDataUpdated.notify();
+        const win = typeof unsafeWindow !== "undefined" ? unsafeWindow : window;
+        win.services.SBC.saveChallenge(challenge).observe(this, (obs, res) => {
+          console.log(`[FC-SBC] Server Save: ${res.success ? "SUCCESS" : "FAILED"}`);
+        });
+        if (controller._overviewController?._pushSquadToView) {
+          controller._overviewController._pushSquadToView(squad);
+        } else if (controller._pushSquadToView) {
+          controller._pushSquadToView(squad);
+        }
+        alert(`Successfully populated squad! Final Rating: ${this.calculateSquadRating(selected)}`);
       } catch (e2) {
         alert("Solver failed: " + e2.message);
-      }
-    }
-static async forceLoadBronzes() {
-      const win = typeof unsafeWindow !== "undefined" ? unsafeWindow : window;
-      const clubSvc = win.services.Club;
-      const vm = new win.UTBucketedItemSearchViewModel();
-      const criteria = vm.searchCriteria;
-      criteria.count = 200;
-      criteria.level = "bronze";
-      criteria.sortBy = "rating";
-      criteria.sortOrder = "ascending";
-      return new Promise((resolve) => {
-        clubSvc.search(criteria).observe(this, function(obs, res) {
-          resolve();
-        });
-        setTimeout(resolve, 4e3);
-      });
-    }
-static getAllAvailablePlayers() {
-      const win = typeof unsafeWindow !== "undefined" ? unsafeWindow : window;
-      const repo = win.repositories?.Item;
-      if (!repo) return [];
-      try {
-        const club = repo.getClub();
-        const coll = club.items?._collection || {};
-        const allItems = Array.isArray(coll) ? coll : Object.values(coll);
-        return allItems.filter((item) => {
-          if (!item || item.concept) return false;
-          const isReal = typeof item.isPlayer === "function" && item.isPlayer() || item.type === "player";
-          const isNotCosmetic = !["stadium", "staff", "badge", "kit"].includes(item.type);
-          return isReal && isNotCosmetic && item.rating > 0;
-        });
-      } catch (e2) {
-        return [];
+        console.error(e2);
       }
     }
   }
@@ -529,13 +627,11 @@ static getAllAvailablePlayers() {
       setIsScanning(true);
       try {
         await new Promise((r2) => setTimeout(r2, 100));
-        const players = SbcBuilder.getAllAvailablePlayers();
-        const sbcStorageCount = players.filter((p2) => p2.isStorage || p2._isStorage || p2.itemType === "sbcstorage").length;
-        const unassignedCount = players.filter((p2) => p2.unassigned).length;
+        const res = await SbcBuilder.primeInventory();
         setStats({
-          total: players.length,
-          sbcStorage: sbcStorageCount,
-          unassigned: unassignedCount
+          total: res.total,
+          sbcStorage: res.storage,
+          unassigned: res.unassigned
         });
       } catch (e2) {
         console.error("[FC-SBC] Scan error:", e2.message);

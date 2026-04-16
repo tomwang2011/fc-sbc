@@ -2,54 +2,43 @@
 
 **Objective:** Create a TypeScript-based Tampermonkey script to run alongside Paletools that provides a "Better Builder" logic, specifically targeting optimal player selection and SBC Storage utilization.
 
-## Core Tech Stack
-- **Language:** TypeScript (compiled via esbuild/Vite)
-- **Frontend:** Preact + Tailwind CSS (Injected via Shadow DOM)
-- **Target:** EA FC Web App (Mobile/Desktop)
-
-## Key Functionalities
-- **Storage-First Priority:** Logic must prioritize items in the "SBC Storage" and "Unassigned" (duplicates) piles before touching the main Club inventory.
-- **Constraint-Based Solver:** Replace simple "lowest-to-highest" sorting with an algorithm that hits exact rating targets (using the 84.x formula) and satisfies chemistry/league requirements.
-- **Safety Filters:** Explicit "Protected" list to exclude active squad members, high-value tradeable cards, and specific assetIds.
-- **Paletools Coexistence:** The script will hook into `window.g_services` and `repositories.ItemRepository`, injecting a custom "🚀 Enhanced Build" button next to existing Paletools menus.
+## 🏆 Current Progress: Milestone 5 Complete
+We have mastered **SBC Storage** and **Unassigned Priority**. We can now identify and prioritize duplicates for building squads.
 
 ## Development Milestones
 
-### Milestone 1: Hello World & Tampermonkey Setup
-- [x] Initialize project with Vite + Preact + Tailwind.
-- [x] Successfully load the script in EA FC Web App.
-- [x] Verify "Hello World" or initial log in the browser console.
-- [x] Ensure Shadow DOM injection works without breaking the main UI.
+### ✅ Milestone 1: Search & Insertion Foundations
+- [x] **Discovery:** Identified official search criteria flags.
+- [x] **Bulk Insertion:** Successfully mapped and inserted 23 players into SBC slots.
 
-### Milestone 2: Data Access & Club Inventory
-- [x] Hook into `window.repositories.Item`.
-- [x] Successfully extract players from:
-    - Main Club Inventory
-    - SBC Storage
-    - Unassigned Pile (Duplicates)
-- [x] Log the total player count and verify player object properties.
+### ✅ Milestone 2: Universal Positioning & Chemistry Maxing
+- [x] **Universal Normalization:** Created dynamic mapping that works for any formation.
+- [x] **Starting 11 Focus:** Restricted auto-filling to the starting XI.
+- [x] **Service Fix:** Implemented "Challenge Stitching" to ensure server-side saving.
 
-### Milestone 3: UI Integration
-- [x] Inject a standalone "🚀 OPEN SBC BUILDER" button.
-- [ ] Create a basic settings modal/panel for the builder.
-- [ ] Implement the "Protected" list UI (selecting players to exclude).
+### ✅ Milestone 3: Requirement Awareness & Multi-Stage Solving
+- [x] **Rule Detection:** Automatically detects TOTW and other rarity requirements.
+- [x] **Multi-Stage Priming:** Combines specialized "SP" searches with standard "Gold" searches.
 
-### Milestone 4: SBC Requirement Extraction
-- [x] Hook into the active SBC challenge context (`UTSBCSquadSplitViewController`).
-- [x] Extract current challenge properties (Name, Slots).
-- [x] Implement basic "Add Player to Slot" functionality.
+### ✅ Milestone 4: 84.x Rating Engine & Strategy-Aware Solver
+- [x] **Rating Math:** Implemented the Correction Factor weighted average formula.
+- [x] **BFS Optimizer:** Created a loop to hit exact rating targets.
+- [x] **Asset Locking:** Protected mandatory players from being upgraded away.
 
-### Milestone 5: The "Better Builder" Logic (Core Solver)
-- [ ] Implement the 84.x rating formula.
-- [ ] Develop the constraint-based solver (prioritizing Storage/Unassigned).
-- [ ] Optimize player selection to hit exact rating targets.
-- [ ] Handle basic chemistry/league requirements.
+### ✅ Milestone 5: SBC Storage & Unassigned Priority
+- [x] **SBC Storage Hook:** Prioritize items in the "SBC Storage" repository.
+- [x] **Unassigned Logic:** Check the "Unassigned" pile for duplicates.
+- [x] **Duplicate Management:** Prevent same `definitionId` twice in one squad.
 
-### Milestone 6: Safety & Refinement
-- [ ] Implement rigorous safety filters (Active Squad, High-Value, Protected List).
-- [ ] Add "Simulation Mode" to see results before applying changes.
-- [ ] Finalize the "Apply to Squad" logic via `g_services.Sbc.repository`.
+### 📍 Milestone 6: Hybrid Solver & Requirement Synthesis
+- [ ] **Unified Hybrid Pool:** Seamlessly merge Storage and Club players into a single, priority-sorted list.
+- [ ] **Storage-First Mandatory Logic:** Hitting "Min. 1 TOTW" or "Min. 1 PL Player" using Storage assets before Club.
+- [ ] **Refined BFS Optimization:** Favoring Storage swaps over Club swaps to hit rating targets.
 
-### Milestone 7: Testing & Packaging
-- [ ] Mobile testing on OnePlus 15 via Kiwi Browser.
-- [ ] Final build optimization and optional Android WebView wrapping.
+### 📅 Milestone 7: UI & Settings
+- [ ] **Builder Panel:** Inject a clean UI to trigger the solver and view potential results.
+- [ ] **Protection Logic:** Select players or rating ranges the solver must NEVER touch.
+
+### 📅 Milestone 8: Refinement & Advanced Chemistry
+- [ ] **Chemistry Awareness:** Basic logic to satisfy "Min Chemistry" or "Exact League" requirements.
+- [ ] **Performance:** Handle massive clubs with 1000+ players efficiently.
