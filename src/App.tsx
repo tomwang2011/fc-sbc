@@ -54,7 +54,17 @@ export function App() {
   };
 
   return (
-    <div className="fixed top-1/2 left-2 -translate-y-1/2 z-[9999999] pointer-events-auto font-sans select-none">
+    <div 
+        style={{ 
+            position: 'fixed', 
+            top: '50%', 
+            left: '8px', 
+            transform: 'translateY(-50%)', 
+            zIndex: 9999999, 
+            pointerEvents: 'auto' 
+        }}
+        className="font-sans select-none"
+    >
       {/* Floating Toggle Bubble - Left Side */}
       <button
         onClick={() => {
@@ -62,14 +72,20 @@ export function App() {
             if (!isOpen && stats.total === 0) handleScan();
         }}
         style={{ 
-            background: isOpen ? '#ef4444' : 'rgba(79, 70, 229, 0.9)', 
-            width: '44px', height: '44px', 
-            boxShadow: '0 8px 16px rgba(0,0,0,0.5)',
-            opacity: '1 !important'
+            background: isOpen ? '#ef4444' : 'rgba(79, 70, 229, 1)', 
+            width: '48px', height: '48px', 
+            boxShadow: '0 8px 20px rgba(0,0,0,0.6)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderRadius: '50%',
+            color: 'white',
+            border: '2px solid rgba(255,255,255,0.3)',
+            cursor: 'pointer'
         }}
-        className="rounded-full text-white font-bold flex items-center justify-center transition-all hover:scale-110 border-2 border-white/30"
+        className="transition-all hover:scale-110"
       >
-        <span className="text-xl">{isOpen ? '✕' : '⚡'}</span>
+        <span style={{ fontSize: '24px', fontWeight: 'bold' }}>{isOpen ? '✕' : '⚡'}</span>
       </button>
 
       {/* Main Panel - Expanding from Left */}
@@ -79,10 +95,18 @@ export function App() {
                 backgroundColor: '#09090b', 
                 opacity: '1 !important', 
                 border: '1px solid #3f3f46',
-                width: 'calc(100vw - 20px)',
-                maxWidth: '320px'
+                width: 'calc(100vw - 24px)',
+                maxWidth: '320px',
+                position: 'absolute',
+                top: '50%',
+                left: '56px',
+                transform: 'translateY(-50%)',
+                borderRadius: '16px',
+                padding: '20px',
+                boxShadow: '0 30px 70px rgba(0,0,0,0.9)',
+                display: 'block'
             }}
-            className="absolute top-1/2 left-12 -translate-y-1/2 rounded-2xl shadow-[0_30px_70px_rgba(0,0,0,0.9)] p-5 animate-in slide-in-from-left-4 fade-in duration-200"
+            className="animate-in slide-in-from-left-4 fade-in duration-200"
         >
           <div className="flex justify-between items-center mb-5">
             <h2 className="text-xs font-black text-white tracking-widest uppercase opacity-80">SBC Master V1.6</h2>

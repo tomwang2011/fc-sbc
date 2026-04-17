@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC SBC Enhanced Builder
 // @namespace    fc-sbc-builder
-// @version      1.0.6
+// @version      1.0.7
 // @author       tomwang
 // @description  Optimal SBC builder with Storage-First priority
 // @license      ISC
@@ -784,123 +784,151 @@ static async solveLeague(log, settings) {
         setIsSolving(false);
       }
     };
-    return u$1("div", { className: "fixed top-1/2 left-2 -translate-y-1/2 z-[9999999] pointer-events-auto font-sans select-none", children: [
+    return u$1(
+      "div",
+      {
+        style: {
+          position: "fixed",
+          top: "50%",
+          left: "8px",
+          transform: "translateY(-50%)",
+          zIndex: 9999999,
+          pointerEvents: "auto"
+        },
+        className: "font-sans select-none",
+        children: [
 u$1(
-        "button",
-        {
-          onClick: () => {
-            setIsOpen(!isOpen);
-            if (!isOpen && stats.total === 0) handleScan();
-          },
-          style: {
-            background: isOpen ? "#ef4444" : "rgba(79, 70, 229, 0.9)",
-            width: "44px",
-            height: "44px",
-            boxShadow: "0 8px 16px rgba(0,0,0,0.5)",
-            opacity: "1 !important"
-          },
-          className: "rounded-full text-white font-bold flex items-center justify-center transition-all hover:scale-110 border-2 border-white/30",
-          children: u$1("span", { className: "text-xl", children: isOpen ? "✕" : "⚡" })
-        }
-      ),
-      isOpen && u$1(
-        "div",
-        {
-          style: {
-            backgroundColor: "#09090b",
-            opacity: "1 !important",
-            border: "1px solid #3f3f46",
-            width: "calc(100vw - 20px)",
-            maxWidth: "320px"
-          },
-          className: "absolute top-1/2 left-12 -translate-y-1/2 rounded-2xl shadow-[0_30px_70px_rgba(0,0,0,0.9)] p-5 animate-in slide-in-from-left-4 fade-in duration-200",
-          children: [
+            "button",
+            {
+              onClick: () => {
+                setIsOpen(!isOpen);
+                if (!isOpen && stats.total === 0) handleScan();
+              },
+              style: {
+                background: isOpen ? "#ef4444" : "rgba(79, 70, 229, 1)",
+                width: "48px",
+                height: "48px",
+                boxShadow: "0 8px 20px rgba(0,0,0,0.6)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                borderRadius: "50%",
+                color: "white",
+                border: "2px solid rgba(255,255,255,0.3)",
+                cursor: "pointer"
+              },
+              className: "transition-all hover:scale-110",
+              children: u$1("span", { style: { fontSize: "24px", fontWeight: "bold" }, children: isOpen ? "✕" : "⚡" })
+            }
+          ),
+          isOpen && u$1(
+            "div",
+            {
+              style: {
+                backgroundColor: "#09090b",
+                opacity: "1 !important",
+                border: "1px solid #3f3f46",
+                width: "calc(100vw - 24px)",
+                maxWidth: "320px",
+                position: "absolute",
+                top: "50%",
+                left: "56px",
+                transform: "translateY(-50%)",
+                borderRadius: "16px",
+                padding: "20px",
+                boxShadow: "0 30px 70px rgba(0,0,0,0.9)",
+                display: "block"
+              },
+              className: "animate-in slide-in-from-left-4 fade-in duration-200",
+              children: [
 u$1("div", { className: "flex justify-between items-center mb-5", children: [
 u$1("h2", { className: "text-xs font-black text-white tracking-widest uppercase opacity-80", children: "SBC Master V1.6" }),
 u$1(
-                "button",
-                {
-                  onClick: handleScan,
-                  disabled: isScanning,
-                  style: { background: "#18181b" },
-                  className: `p-2 rounded-lg ${isScanning ? "animate-spin opacity-50" : ""} border border-zinc-800 text-zinc-400`,
-                  children: "🔄"
-                }
-              )
-            ] }),
+                    "button",
+                    {
+                      onClick: handleScan,
+                      disabled: isScanning,
+                      style: { background: "#18181b" },
+                      className: `p-2 rounded-lg ${isScanning ? "animate-spin opacity-50" : ""} border border-zinc-800 text-zinc-400`,
+                      children: "🔄"
+                    }
+                  )
+                ] }),
 u$1("div", { className: "space-y-4", children: [
 u$1("div", { className: "grid grid-cols-3 gap-2", children: [
 u$1("div", { style: { background: "#18181b" }, className: "p-2.5 rounded-xl text-center border border-zinc-800", children: [
 u$1("div", { className: "text-[8px] text-zinc-500 font-bold uppercase mb-1", children: "Club" }),
 u$1("div", { className: "font-black text-white text-sm", children: stats.total })
-                ] }),
+                    ] }),
 u$1("div", { style: { background: "#172554" }, className: "p-2.5 rounded-xl text-center border border-blue-900", children: [
 u$1("div", { className: "text-[8px] text-blue-400 font-bold uppercase mb-1", children: "Storage" }),
 u$1("div", { className: "font-black text-blue-300 text-sm", children: stats.sbcStorage })
-                ] }),
+                    ] }),
 u$1("div", { style: { background: "#431407" }, className: "p-2.5 rounded-xl text-center border border-orange-900", children: [
 u$1("div", { className: "text-[8px] text-orange-400 font-bold uppercase mb-1", children: "Unasgn" }),
 u$1("div", { className: "font-black text-orange-300 text-sm", children: stats.unassigned })
-                ] })
-              ] }),
+                    ] })
+                  ] }),
 u$1("div", { style: { background: "#18181b" }, className: "p-3.5 rounded-xl border border-zinc-800", children: [
 u$1("h3", { className: "text-[9px] font-black text-zinc-500 uppercase mb-2 tracking-widest text-center", children: "Ignore Leagues" }),
 u$1("div", { className: "grid grid-cols-4 gap-1.5", children: leagues.map((l2) => u$1(
-                  "button",
-                  {
-                    onClick: () => toggleLeague(l2.id),
-                    style: { background: excludedLeagues.includes(l2.id) ? "#dc2626" : "#27272a" },
-                    className: `text-[8px] font-black py-2 rounded-lg transition-all ${excludedLeagues.includes(l2.id) ? "text-white border-red-800 shadow-inner" : "text-zinc-500 border-zinc-800"} border`,
-                    children: l2.name
-                  }
-                )) })
-              ] }),
+                      "button",
+                      {
+                        onClick: () => toggleLeague(l2.id),
+                        style: { background: excludedLeagues.includes(l2.id) ? "#dc2626" : "#27272a" },
+                        className: `text-[8px] font-black py-2 rounded-lg transition-all ${excludedLeagues.includes(l2.id) ? "text-white border-red-800 shadow-inner" : "text-zinc-500 border-zinc-800"} border`,
+                        children: l2.name
+                      }
+                    )) })
+                  ] }),
 u$1("div", { style: { background: "#18181b" }, className: "p-3.5 rounded-xl border border-zinc-800", children: u$1("label", { className: "flex items-center justify-between cursor-pointer", children: [
 u$1("span", { className: "text-[9px] font-black text-zinc-400 uppercase tracking-widest", children: "Untradeable Only" }),
 u$1("div", { className: "relative", children: [
 u$1("input", { type: "checkbox", className: "sr-only", checked: untradOnly, onChange: (e2) => setUntradOnly(e2.currentTarget.checked) }),
 u$1("div", { className: `w-10 h-5 rounded-full transition-colors ${untradOnly ? "bg-indigo-600" : "bg-zinc-700"}` }),
 u$1("div", { className: `absolute left-1 top-1 w-3 h-3 bg-white rounded-full transition-transform ${untradOnly ? "translate-x-5" : ""}` })
-                ] })
-              ] }) }),
+                    ] })
+                  ] }) }),
 u$1("div", { className: "space-y-2 pt-1", children: [
 u$1(
-                  "button",
-                  {
-                    disabled: isSolving,
-                    onClick: () => runSolver("league"),
-                    style: { background: "#4f46e5", borderBottom: "3px solid #3730a3", minHeight: "44px" },
-                    className: "w-full text-white rounded-xl text-[10px] font-black shadow-lg transition-all active:translate-y-[2px] active:border-b-0 flex items-center justify-center gap-2 uppercase tracking-tight",
-                    children: "⚽ League Solver"
-                  }
-                ),
+                      "button",
+                      {
+                        disabled: isSolving,
+                        onClick: () => runSolver("league"),
+                        style: { background: "#4f46e5", borderBottom: "3px solid #3730a3", minHeight: "44px" },
+                        className: "w-full text-white rounded-xl text-[10px] font-black shadow-lg transition-all active:translate-y-[2px] active:border-b-0 flex items-center justify-center gap-2 uppercase tracking-tight",
+                        children: "⚽ League Solver"
+                      }
+                    ),
 u$1(
-                  "button",
-                  {
-                    disabled: isSolving,
-                    onClick: () => runSolver("declog"),
-                    style: { background: "#d97706", borderBottom: "3px solid #92400e", minHeight: "44px" },
-                    className: "w-full text-white rounded-xl text-[10px] font-black shadow-lg transition-all active:translate-y-[2px] active:border-b-0 flex items-center justify-center gap-2 uppercase tracking-tight",
-                    children: "📦 De-Clogger (83+)"
-                  }
-                ),
+                      "button",
+                      {
+                        disabled: isSolving,
+                        onClick: () => runSolver("declog"),
+                        style: { background: "#d97706", borderBottom: "3px solid #92400e", minHeight: "44px" },
+                        className: "w-full text-white rounded-xl text-[10px] font-black shadow-lg transition-all active:translate-y-[2px] active:border-b-0 flex items-center justify-center gap-2 uppercase tracking-tight",
+                        children: "📦 De-Clogger (83+)"
+                      }
+                    ),
 u$1(
-                  "button",
-                  {
-                    disabled: isSolving,
-                    onClick: () => runSolver("efficient"),
-                    style: { background: "#059669", borderBottom: "3px solid #065f46", minHeight: "44px" },
-                    className: "w-full text-white rounded-xl text-[10px] font-black shadow-lg transition-all active:translate-y-[2px] active:border-b-0 flex items-center justify-center gap-2 uppercase tracking-tight",
-                    children: "💎 Rare/Common"
-                  }
-                )
-              ] }),
+                      "button",
+                      {
+                        disabled: isSolving,
+                        onClick: () => runSolver("efficient"),
+                        style: { background: "#059669", borderBottom: "3px solid #065f46", minHeight: "44px" },
+                        className: "w-full text-white rounded-xl text-[10px] font-black shadow-lg transition-all active:translate-y-[2px] active:border-b-0 flex items-center justify-center gap-2 uppercase tracking-tight",
+                        children: "💎 Rare/Common"
+                      }
+                    )
+                  ] }),
 u$1("div", { style: { background: "#000" }, className: "rounded-xl p-3 min-h-[50px] flex items-center justify-center border border-zinc-800 shadow-inner", children: u$1("p", { className: "text-[9px] text-zinc-400 font-bold text-center leading-tight uppercase tracking-widest", children: status }) })
-            ] })
-          ]
-        }
-      )
-    ] });
+                ] })
+              ]
+            }
+          )
+        ]
+      }
+    );
   }
   const styleCss = "@tailwind base;@tailwind components;@tailwind utilities;";
   const style = Object.freeze( Object.defineProperty({
