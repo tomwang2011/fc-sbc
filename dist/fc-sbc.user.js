@@ -677,15 +677,20 @@ static async solveLeague(log, settings) {
       const ctx = this.getSbcContext();
       if (!ctx) return log("❌ SBC Screen Not Found");
       const { challenge, squad, controller } = ctx;
-      log("Syncing Required Leagues...");
+      log("Analyzing Target Rating...");
+      const rawReqs = challenge.eligibilityRequirements || [];
+      let targetRating = 0;
       const detectedLeagues = new Set();
-      (challenge.eligibilityRequirements || []).forEach((r2) => {
+      rawReqs.forEach((r2) => {
         const col = r2.kvPairs._collection || r2.kvPairs;
-        for (let k2 in col) if (parseInt(k2) === 11) {
+        for (let k2 in col) {
           const val = this.getCleanValue(col[k2]);
-          (Array.isArray(val) ? val : [val]).forEach((l2) => detectedLeagues.add(l2));
+          const key = parseInt(k2);
+          if (key === 19) targetRating = Math.max(targetRating, val || 0);
+          if (key === 11) (Array.isArray(val) ? val : [val]).forEach((l2) => detectedLeagues.add(l2));
         }
       });
+      log(`Goal: ${targetRating} Rating | Required Leagues: ${Array.from(detectedLeagues).join(",")}`);
       const discoveryLeagues = Array.from(detectedLeagues).slice(0, 3);
       await Promise.all(discoveryLeagues.map((l2) => this.fetchItems({ league: l2, count: 150 })));
       await this.primeInventory();
@@ -701,7 +706,7 @@ static async solveLeague(log, settings) {
       const usedIds = new Set();
       const activeSlots = squad.getSBCSlots().filter((s2) => !s2.isBrick() && s2.index <= 10);
       const selected = new Array(activeSlots.length).fill(null);
-      const fill = (source, matchPos) => {
+      const fillPass = (source, matchPos) => {
         activeSlots.forEach((slot, i2) => {
           if (selected[i2]) return;
           const slotPos = SbcBuilder.normalizePos(slot.position?.id || slot._position);
@@ -718,17 +723,37 @@ static async solveLeague(log, settings) {
           }
         });
       };
-      fill("storage", true);
-      fill("storage", false);
-      fill("club", true);
-      fill("club", false);
+      fillPass("storage", true);
+      fillPass("storage", false);
+      fillPass("club", true);
+      fillPass("club", false);
+      if (targetRating > 0) {
+        log(`Optimizing Rating to hit ${targetRating}...`);
+        let bridgeAttempts = 0;
+        while (bridgeAttempts < 50 && this.calculateRating(selected) < targetRating) {
+          bridgeAttempts++;
+          const minR = Math.min(...selected.filter((s2) => s2).map((s2) => s2.rating));
+          const upIdx = selected.findIndex((s2) => s2 && s2.rating === minR);
+          if (upIdx === -1) break;
+          const currentItem = selected[upIdx];
+          const upgrade = pool.find((p2) => !usedIds.has(p2.id) && !usedPersonaIds.has(p2._personaId) && p2.rating > currentItem.rating && p2.leagueId === currentItem.leagueId);
+          if (upgrade) {
+            console.log(`[BRIDGE] Upgrading Slot ${upIdx}: ${currentItem.rating} -> ${upgrade.rating} (${upgrade._staticData?.name})`);
+            usedIds.delete(currentItem.id);
+            usedPersonaIds.delete(currentItem._personaId);
+            selected[upIdx] = upgrade;
+            usedIds.add(upgrade.id);
+            usedPersonaIds.add(upgrade._personaId);
+          } else break;
+        }
+      }
       const finalArray = new Array(23).fill(null);
       activeSlots.forEach((slot, i2) => {
         if (selected[i2]) finalArray[slot.index] = selected[i2];
       });
       squad.setPlayers(finalArray);
       await this.saveSquad(challenge, squad, controller);
-      log("✅ League Solve Complete.");
+      log(`✅ League Solve Complete. Rating: ${this.calculateRating(selected)}`);
     }
   }
   function App() {
