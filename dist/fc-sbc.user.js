@@ -792,8 +792,8 @@ static async solveLeague(log, settings) {
           top: "50%",
           left: "8px",
           transform: "translateY(-50%)",
-          zIndex: 9999999,
-          pointerEvents: "auto"
+          pointerEvents: "auto",
+          zIndex: 2147483647
         },
         className: "font-sans select-none",
         children: [
@@ -805,20 +805,21 @@ u$1(
                 if (!isOpen && stats.total === 0) handleScan();
               },
               style: {
-                background: isOpen ? "#ef4444" : "rgba(79, 70, 229, 1)",
+                backgroundColor: isOpen ? "#ef4444" : "#4f46e5",
                 width: "48px",
                 height: "48px",
-                boxShadow: "0 8px 20px rgba(0,0,0,0.6)",
+                boxShadow: "0 8px 24px rgba(0,0,0,0.7)",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
                 borderRadius: "50%",
                 color: "white",
-                border: "2px solid rgba(255,255,255,0.3)",
-                cursor: "pointer"
+                border: "2px solid rgba(255,255,255,0.4)",
+                cursor: "pointer",
+                transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
+                opacity: "1 !important"
               },
-              className: "transition-all hover:scale-110",
-              children: u$1("span", { style: { fontSize: "24px", fontWeight: "bold" }, children: isOpen ? "✕" : "⚡" })
+              children: u$1("span", { style: { fontSize: "24px", fontWeight: "900" }, children: isOpen ? "✕" : "⚡" })
             }
           ),
           isOpen && u$1(
@@ -832,71 +833,74 @@ u$1(
                 maxWidth: "320px",
                 position: "absolute",
                 top: "50%",
-                left: "56px",
+                left: "60px",
                 transform: "translateY(-50%)",
-                borderRadius: "16px",
-                padding: "20px",
-                boxShadow: "0 30px 70px rgba(0,0,0,0.9)",
+                borderRadius: "20px",
+                padding: "24px",
+                boxShadow: "0 40px 100px rgba(0,0,0,1)",
                 display: "block"
               },
-              className: "animate-in slide-in-from-left-4 fade-in duration-200",
+              className: "animate-in slide-in-from-left-4 fade-in duration-300",
               children: [
-u$1("div", { className: "flex justify-between items-center mb-5", children: [
-u$1("h2", { className: "text-xs font-black text-white tracking-widest uppercase opacity-80", children: "SBC Master V1.6" }),
+u$1("div", { className: "flex justify-between items-center mb-6", children: [
+u$1("h2", { className: "text-xs font-black text-white tracking-widest uppercase opacity-60", children: "SBC Master V1.0.8" }),
 u$1(
                     "button",
                     {
                       onClick: handleScan,
                       disabled: isScanning,
-                      style: { background: "#18181b" },
-                      className: `p-2 rounded-lg ${isScanning ? "animate-spin opacity-50" : ""} border border-zinc-800 text-zinc-400`,
+                      style: { background: "#18181b", borderRadius: "8px", border: "1px solid #27272a" },
+                      className: `p-2 ${isScanning ? "animate-spin opacity-50" : ""} text-zinc-400`,
                       children: "🔄"
                     }
                   )
                 ] }),
-u$1("div", { className: "space-y-4", children: [
-u$1("div", { className: "grid grid-cols-3 gap-2", children: [
-u$1("div", { style: { background: "#18181b" }, className: "p-2.5 rounded-xl text-center border border-zinc-800", children: [
+u$1("div", { className: "space-y-5", children: [
+u$1("div", { className: "grid grid-cols-3 gap-2.5", children: [
+u$1("div", { style: { background: "#18181b" }, className: "p-3 rounded-2xl text-center border border-zinc-800 shadow-sm", children: [
 u$1("div", { className: "text-[8px] text-zinc-500 font-bold uppercase mb-1", children: "Club" }),
-u$1("div", { className: "font-black text-white text-sm", children: stats.total })
+u$1("div", { className: "font-black text-white text-base", children: stats.total })
                     ] }),
-u$1("div", { style: { background: "#172554" }, className: "p-2.5 rounded-xl text-center border border-blue-900", children: [
+u$1("div", { style: { background: "#172554" }, className: "p-3 rounded-2xl text-center border border-blue-900 shadow-sm", children: [
 u$1("div", { className: "text-[8px] text-blue-400 font-bold uppercase mb-1", children: "Storage" }),
-u$1("div", { className: "font-black text-blue-300 text-sm", children: stats.sbcStorage })
+u$1("div", { className: "font-black text-blue-300 text-base", children: stats.sbcStorage })
                     ] }),
-u$1("div", { style: { background: "#431407" }, className: "p-2.5 rounded-xl text-center border border-orange-900", children: [
+u$1("div", { style: { background: "#431407" }, className: "p-3 rounded-2xl text-center border border-orange-950 shadow-sm", children: [
 u$1("div", { className: "text-[8px] text-orange-400 font-bold uppercase mb-1", children: "Unasgn" }),
-u$1("div", { className: "font-black text-orange-300 text-sm", children: stats.unassigned })
+u$1("div", { className: "font-black text-orange-300 text-base", children: stats.unassigned })
                     ] })
                   ] }),
-u$1("div", { style: { background: "#18181b" }, className: "p-3.5 rounded-xl border border-zinc-800", children: [
-u$1("h3", { className: "text-[9px] font-black text-zinc-500 uppercase mb-2 tracking-widest text-center", children: "Ignore Leagues" }),
-u$1("div", { className: "grid grid-cols-4 gap-1.5", children: leagues.map((l2) => u$1(
+u$1("div", { style: { background: "#18181b" }, className: "p-4 rounded-2xl border border-zinc-800 shadow-inner", children: [
+u$1("h3", { className: "text-[9px] font-black text-zinc-500 uppercase mb-3 tracking-widest text-center", children: "Ignore Leagues" }),
+u$1("div", { className: "grid grid-cols-4 gap-2", children: leagues.map((l2) => u$1(
                       "button",
                       {
                         onClick: () => toggleLeague(l2.id),
-                        style: { background: excludedLeagues.includes(l2.id) ? "#dc2626" : "#27272a" },
-                        className: `text-[8px] font-black py-2 rounded-lg transition-all ${excludedLeagues.includes(l2.id) ? "text-white border-red-800 shadow-inner" : "text-zinc-500 border-zinc-800"} border`,
+                        style: {
+                          background: excludedLeagues.includes(l2.id) ? "#dc2626" : "#27272a",
+                          minHeight: "32px"
+                        },
+                        className: `text-[8px] font-black rounded-lg transition-all ${excludedLeagues.includes(l2.id) ? "text-white border-red-800" : "text-zinc-500 border-zinc-800"} border shadow-sm`,
                         children: l2.name
                       }
                     )) })
                   ] }),
-u$1("div", { style: { background: "#18181b" }, className: "p-3.5 rounded-xl border border-zinc-800", children: u$1("label", { className: "flex items-center justify-between cursor-pointer", children: [
+u$1("div", { style: { background: "#18181b" }, className: "p-4 rounded-2xl border border-zinc-800", children: u$1("label", { className: "flex items-center justify-between cursor-pointer", children: [
 u$1("span", { className: "text-[9px] font-black text-zinc-400 uppercase tracking-widest", children: "Untradeable Only" }),
 u$1("div", { className: "relative", children: [
 u$1("input", { type: "checkbox", className: "sr-only", checked: untradOnly, onChange: (e2) => setUntradOnly(e2.currentTarget.checked) }),
-u$1("div", { className: `w-10 h-5 rounded-full transition-colors ${untradOnly ? "bg-indigo-600" : "bg-zinc-700"}` }),
-u$1("div", { className: `absolute left-1 top-1 w-3 h-3 bg-white rounded-full transition-transform ${untradOnly ? "translate-x-5" : ""}` })
+u$1("div", { className: `w-11 h-6 rounded-full transition-colors ${untradOnly ? "bg-indigo-600" : "bg-zinc-700"}` }),
+u$1("div", { className: `absolute left-1 top-1 w-4 h-4 bg-white rounded-full transition-transform ${untradOnly ? "translate-x-5" : ""}` })
                     ] })
                   ] }) }),
-u$1("div", { className: "space-y-2 pt-1", children: [
+u$1("div", { className: "space-y-3 pt-2", children: [
 u$1(
                       "button",
                       {
                         disabled: isSolving,
                         onClick: () => runSolver("league"),
-                        style: { background: "#4f46e5", borderBottom: "3px solid #3730a3", minHeight: "44px" },
-                        className: "w-full text-white rounded-xl text-[10px] font-black shadow-lg transition-all active:translate-y-[2px] active:border-b-0 flex items-center justify-center gap-2 uppercase tracking-tight",
+                        style: { background: "#4f46e5", borderBottom: "4px solid #3730a3", minHeight: "48px" },
+                        className: "w-full text-white rounded-2xl text-[10px] font-black shadow-lg transition-all active:translate-y-[2px] active:border-b-0 flex items-center justify-center gap-2 uppercase tracking-widest",
                         children: "⚽ League Solver"
                       }
                     ),
@@ -905,9 +909,9 @@ u$1(
                       {
                         disabled: isSolving,
                         onClick: () => runSolver("declog"),
-                        style: { background: "#d97706", borderBottom: "3px solid #92400e", minHeight: "44px" },
-                        className: "w-full text-white rounded-xl text-[10px] font-black shadow-lg transition-all active:translate-y-[2px] active:border-b-0 flex items-center justify-center gap-2 uppercase tracking-tight",
-                        children: "📦 De-Clogger (83+)"
+                        style: { background: "#d97706", borderBottom: "4px solid #92400e", minHeight: "48px" },
+                        className: "w-full text-white rounded-2xl text-[10px] font-black shadow-lg transition-all active:translate-y-[2px] active:border-b-0 flex items-center justify-center gap-2 uppercase tracking-widest",
+                        children: "📦 De-Clogger"
                       }
                     ),
 u$1(
@@ -915,13 +919,13 @@ u$1(
                       {
                         disabled: isSolving,
                         onClick: () => runSolver("efficient"),
-                        style: { background: "#059669", borderBottom: "3px solid #065f46", minHeight: "44px" },
-                        className: "w-full text-white rounded-xl text-[10px] font-black shadow-lg transition-all active:translate-y-[2px] active:border-b-0 flex items-center justify-center gap-2 uppercase tracking-tight",
-                        children: "💎 Rare/Common"
+                        style: { background: "#059669", borderBottom: "4px solid #065f46", minHeight: "48px" },
+                        className: "w-full text-white rounded-2xl text-[10px] font-black shadow-lg transition-all active:translate-y-[2px] active:border-b-0 flex items-center justify-center gap-2 uppercase tracking-widest",
+                        children: "💎 Efficient"
                       }
                     )
                   ] }),
-u$1("div", { style: { background: "#000" }, className: "rounded-xl p-3 min-h-[50px] flex items-center justify-center border border-zinc-800 shadow-inner", children: u$1("p", { className: "text-[9px] text-zinc-400 font-bold text-center leading-tight uppercase tracking-widest", children: status }) })
+u$1("div", { style: { background: "#000" }, className: "rounded-2xl p-4 min-h-[56px] flex items-center justify-center border border-zinc-800 shadow-inner", children: u$1("p", { className: "text-[10px] text-zinc-400 font-bold text-center leading-tight uppercase tracking-widest", children: status }) })
                 ] })
               ]
             }
@@ -939,12 +943,12 @@ u$1("div", { style: { background: "#000" }, className: "rounded-xl p-3 min-h-[50
   console.log("%c--- [FC-SBC] SCRIPT INJECTED & RUNNING ---", "background: #000; color: #fff; font-size: 20px;");
   const init = () => {
     if (document.getElementById("fc-sbc-builder-root")) return;
-    const root = document.querySelector(".ut-root-view") || document.body;
+    const root = document.body;
     if (!root) return;
     console.log(`[FC-SBC] Mounting UI into ${root.tagName}...`);
     const container = document.createElement("div");
     container.id = "fc-sbc-builder-root";
-    container.style.cssText = "position:fixed; top:0; left:0; z-index:9999999; pointer-events:none;";
+    container.style.cssText = "position:fixed; top:0; left:0; width:0; height:0; z-index:2147483647; pointer-events:none;";
     root.appendChild(container);
     const shadowRoot = container.attachShadow({ mode: "open" });
     const mountPoint = document.createElement("div");
@@ -958,8 +962,7 @@ u$1("div", { style: { background: "#000" }, className: "rounded-xl p-3 min-h-[50
     R( u$1(App, {}), mountPoint);
   };
   const checkUI = setInterval(() => {
-    const root = document.querySelector(".ut-root-view");
-    if (root) {
+    if (document.body) {
       clearInterval(checkUI);
       init();
     }

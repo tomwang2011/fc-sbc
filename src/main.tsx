@@ -8,13 +8,15 @@ console.log('%c--- [FC-SBC] SCRIPT INJECTED & RUNNING ---', 'background: #000; c
 const init = () => {
   if (document.getElementById('fc-sbc-builder-root')) return;
 
-  const root = document.querySelector('.ut-root-view') || document.body;
+  // Mount to body to avoid clipping by Web App containers
+  const root = document.body;
   if (!root) return;
 
   console.log(`[FC-SBC] Mounting UI into ${root.tagName}...`);
   const container = document.createElement('div');
   container.id = 'fc-sbc-builder-root';
-  container.style.cssText = 'position:fixed; top:0; left:0; z-index:9999999; pointer-events:none;';
+  // Standard fixed positioning for the entire tool container
+  container.style.cssText = 'position:fixed; top:0; left:0; width:0; height:0; z-index:2147483647; pointer-events:none;';
   root.appendChild(container);
 
   const shadowRoot = container.attachShadow({ mode: 'open' });
@@ -32,10 +34,9 @@ const init = () => {
   render(<App />, mountPoint);
 };
 
-// Check for UI and initialize
+// Check for body and initialize
 const checkUI = setInterval(() => {
-  const root = document.querySelector('.ut-root-view');
-  if (root) {
+  if (document.body) {
     clearInterval(checkUI);
     init();
   }
