@@ -438,12 +438,21 @@
           if (node._squad && node._challenge) return node;
           const children = [...node.childViewControllers || [], ...node.presentedViewController ? [node.presentedViewController] : [], ...node.currentController ? [node.currentController] : [], ...node._viewControllers || []];
           for (const child of children) {
-            const found = findController(child);
-            if (found) return found;
+            if (findController(child)) return findController(child);
           }
           return null;
         };
-        const controller = findController(root);
+        const find = (n2) => {
+          if (!n2) return null;
+          if (n2._squad && n2._challenge) return n2;
+          const kids = [...n2.childViewControllers || [], ...n2.presentedViewController ? [n2.presentedViewController] : [], ...n2.currentController ? [n2.currentController] : [], ...n2._viewControllers || []];
+          for (const k2 of kids) {
+            const r2 = find(k2);
+            if (r2) return r2;
+          }
+          return null;
+        };
+        const controller = find(root);
         return controller ? { challenge: controller._challenge, squad: controller._squad, controller } : null;
       } catch (e2) {
         return null;
@@ -494,6 +503,9 @@
       const addEntities = (items, source) => {
         items.forEach((p2) => {
           if (p2 && p2.id && !allPlayers.has(p2.id)) {
+            const isStandard = p2.rareflag === 0 || p2.rareflag === 1 || p2.rarityId === 3 || p2.rareflag === 3;
+            const isEvo = !!p2.evolutionInfo || p2.rareflag === 116 || p2.upgrades !== null;
+            if (!isStandard || isEvo) return;
             p2._sourceType = source;
             p2._sourcePriority = source === "storage" ? 0 : source === "unassigned" ? 1 : 2;
             p2._personaId = Number(p2.definitionId) % 16777216;
@@ -571,7 +583,6 @@ static async solveEfficient(log, settings) {
       const pool = this._clubPlayersMemory.filter((p2) => {
         if (settings.untradOnly && p2.tradable !== false) return false;
         if (settings.excludedLeagues.includes(p2.leagueId)) return false;
-        if (p2.limitedUseType === 2 || !!p2.evolutionInfo || p2.rareflag > 1) return false;
         return true;
       }).sort((a2, b2) => a2._sourcePriority - b2._sourcePriority || a2.rating - b2.rating);
       const usedPersonaIds = new Set();
@@ -624,7 +635,7 @@ static async solveDeClogger(log, settings) {
       const pool = this._clubPlayersMemory.filter((p2) => {
         if (settings.untradOnly && p2.tradable !== false) return false;
         if (settings.excludedLeagues.includes(p2.leagueId)) return false;
-        if (p2.rating >= 89 || !!p2.evolutionInfo || p2.rareflag === 116) return false;
+        if (p2.rating >= 89) return false;
         return true;
       }).sort((a2, b2) => a2._sourcePriority - b2._sourcePriority || a2.rating - b2.rating);
       const usedPersonaIds = new Set();
@@ -667,7 +678,7 @@ static async solveDeClogger(log, settings) {
       });
       const finalArray = new Array(23).fill(null);
       activeSlots.forEach((slot, i2) => {
-        if (selected[i2]) finalArray[slot.index] = selected[i2];
+        if (selected[i2]) finalArray[slot.index] = selected[i2].item || selected[i2];
       });
       squad.setPlayers(finalArray);
       await this.saveSquad(challenge, squad, controller);
@@ -701,7 +712,7 @@ static async solveLeague(log, settings) {
       const pool = this._clubPlayersMemory.filter((p2) => {
         if (settings.untradOnly && p2.tradable !== false) return false;
         if (settings.excludedLeagues.includes(p2.leagueId)) return false;
-        if (p2.rating >= 83 || !!p2.evolutionInfo) return false;
+        if (p2.rating >= 83) return false;
         if (globalLeagues.length > 0 && !globalLeagues.includes(p2.leagueId)) return false;
         return true;
       }).sort((a2, b2) => a2._sourcePriority - b2._sourcePriority || a2.rating - b2.rating);
@@ -752,7 +763,7 @@ static async solveLeague(log, settings) {
       }
       const finalArray = new Array(23).fill(null);
       activeSlots.forEach((slot, i2) => {
-        if (selected[i2]) finalArray[slot.index] = selected[i2];
+        if (selected[i2]) finalArray[slot.index] = selected[i2].item || selected[i2];
       });
       squad.setPlayers(finalArray);
       await this.saveSquad(challenge, squad, controller);

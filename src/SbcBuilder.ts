@@ -49,13 +49,18 @@ export class SbcBuilder {
         if (!node) return null;
         if (node._squad && node._challenge) return node;
         const children = [...(node.childViewControllers || []), ...(node.presentedViewController ? [node.presentedViewController] : []), ...(node.currentController ? [node.currentController] : []), ...(node._viewControllers || [])];
-        for (const child of children) {
-          const found = findController(child);
-          if (found) return found;
-        }
+        for (const child of children) { if (findController(child)) return findController(child); }
         return null;
       };
-      const controller = findController(root);
+      // Recursive find logic
+      const find = (n: any): any => {
+          if (!n) return null;
+          if (n._squad && n._challenge) return n;
+          const kids = [...(n.childViewControllers || []), ...(n.presentedViewController ? [n.presentedViewController] : []), ...(n.currentController ? [n.currentController] : []), ...(n._viewControllers || [])];
+          for (const k of kids) { const r = find(k); if (r) return r; }
+          return null;
+      };
+      const controller = find(root);
       return controller ? { challenge: controller._challenge, squad: controller._squad, controller } : null;
     } catch (e) { return null; }
   }
@@ -104,6 +109,11 @@ export class SbcBuilder {
     const addEntities = (items: any[], source: string) => {
       items.forEach((p: any) => {
         if (p && p.id && !allPlayers.has(p.id)) {
+          // QUALITY GATE: Only Standard (Gold/Silver/Bronze) & TOTW
+          const isStandard = p.rareflag === 0 || p.rareflag === 1 || p.rarityId === 3 || p.rareflag === 3;
+          const isEvo = !!p.evolutionInfo || p.rareflag === 116 || p.upgrades !== null;
+          if (!isStandard || isEvo) return;
+
           p._sourceType = source;
           p._sourcePriority = (source === 'storage' ? 0 : (source === 'unassigned' ? 1 : 2));
           p._personaId = Number(p.definitionId) % 16777216;
@@ -192,7 +202,6 @@ export class SbcBuilder {
     const pool = this._clubPlayersMemory.filter(p => {
         if (settings.untradOnly && p.tradable !== false) return false;
         if (settings.excludedLeagues.includes(p.leagueId!)) return false;
-        if (p.limitedUseType === 2 || !!p.evolutionInfo || p.rareflag > 1) return false;
         return true;
     }).sort((a,b) => (a._sourcePriority! - b._sourcePriority!) || (a.rating - b.rating));
 
@@ -249,7 +258,7 @@ export class SbcBuilder {
     const pool = this._clubPlayersMemory.filter(p => {
         if (settings.untradOnly && p.tradable !== false) return false;
         if (settings.excludedLeagues.includes(p.leagueId!)) return false;
-        if (p.rating >= 89 || !!p.evolutionInfo || p.rareflag === 116) return false;
+        if (p.rating >= 89) return false;
         return true;
     }).sort((a,b) => (a._sourcePriority! - b._sourcePriority!) || (a.rating - b.rating));
 
@@ -286,7 +295,7 @@ export class SbcBuilder {
     });
 
     const finalArray = new Array(23).fill(null);
-    activeSlots.forEach((slot: any, i: number) => { if (selected[i]) finalArray[slot.index] = selected[i]; });
+    activeSlots.forEach((slot: any, i: number) => { if (selected[i]) finalArray[slot.index] = (selected[i] as any).item || selected[i]; });
     squad.setPlayers(finalArray);
     await this.saveSquad(challenge, squad, controller);
     log("✅ De-Clogger Complete.");
@@ -304,7 +313,6 @@ export class SbcBuilder {
     const detectedLeagues = new Set<number>();
 
     rawReqs.forEach((r: any) => {
-        const rules: any[] = [];
         const col = r.kvPairs._collection || r.kvPairs;
         for (let k in col) {
             const val = this.getCleanValue(col[k]);
@@ -327,7 +335,7 @@ export class SbcBuilder {
     const pool = this._clubPlayersMemory.filter(p => {
         if (settings.untradOnly && p.tradable !== false) return false;
         if (settings.excludedLeagues.includes(p.leagueId!)) return false;
-        if (p.rating >= 83 || !!p.evolutionInfo) return false;
+        if (p.rating >= 83) return false;
         if (globalLeagues.length > 0 && !globalLeagues.includes(p.leagueId!)) return false;
         return true;
     }).sort((a,b) => (a._sourcePriority! - b._sourcePriority!) || (a.rating - b.rating));
@@ -353,7 +361,14 @@ export class SbcBuilder {
         });
     };
 
-    fillPass('storage', true); fillPass('storage', false); fillPass('club', true); fillPass('club', false);
+    // 1. Storage Position Match
+    fillPass('storage', true);
+    // 2. Storage Leftovers
+    fillPass('storage', false);
+    // 3. Club Position Match (For Chem)
+    fillPass('club', true);
+    // 4. Club Fillers
+    fillPass('club', false);
 
     // --- RATING BRIDGE PASS ---
     if (targetRating > 0) {
@@ -378,7 +393,7 @@ export class SbcBuilder {
     }
 
     const finalArray = new Array(23).fill(null);
-    activeSlots.forEach((slot: any, i: number) => { if (selected[i]) finalArray[slot.index] = selected[i]; });
+    activeSlots.forEach((slot: any, i: number) => { if (selected[i]) finalArray[slot.index] = (selected[i] as any).item || selected[i]; });
     squad.setPlayers(finalArray);
     await this.saveSquad(challenge, squad, controller);
     log(`✅ League Solve Complete. Rating: ${this.calculateRating(selected)}`);
