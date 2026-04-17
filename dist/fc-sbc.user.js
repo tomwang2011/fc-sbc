@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC SBC Enhanced Builder
 // @namespace    fc-sbc-builder
-// @version      1.0.8
+// @version      1.0.9
 // @author       tomwang
 // @description  Optimal SBC builder with Storage-First priority
 // @license      ISC
@@ -686,7 +686,10 @@ static async solveLeague(log, settings) {
         for (let k2 in col) {
           const val = this.getCleanValue(col[k2]);
           const key = parseInt(k2);
-          if (key === 19) targetRating = Math.max(targetRating, val || 0);
+          if (key === 19) {
+            const cleanVal = Array.isArray(val) ? val[0] : val;
+            targetRating = Math.max(targetRating, Number(cleanVal) || 0);
+          }
           if (key === 11) (Array.isArray(val) ? val : [val]).forEach((l2) => detectedLeagues.add(l2));
         }
       });
@@ -868,7 +871,7 @@ u$1(
               className: "animate-in slide-in-from-left-4 fade-in duration-300",
               children: [
 u$1("div", { className: "flex justify-between items-center mb-6", children: [
-u$1("h2", { className: "text-xs font-black text-white tracking-widest uppercase opacity-60", children: "SBC Master V1.0.8" }),
+u$1("h2", { className: "text-xs font-black text-white tracking-widest uppercase opacity-60", children: "SBC Master V1.0.9" }),
 u$1(
                     "button",
                     {

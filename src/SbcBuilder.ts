@@ -309,7 +309,10 @@ export class SbcBuilder {
         for (let k in col) {
             const val = this.getCleanValue(col[k]);
             const key = parseInt(k);
-            if (key === 19) targetRating = Math.max(targetRating, val || 0);
+            if (key === 19) {
+                const cleanVal = Array.isArray(val) ? val[0] : val;
+                targetRating = Math.max(targetRating, Number(cleanVal) || 0);
+            }
             if (key === 11) (Array.isArray(val) ? val : [val]).forEach(l => detectedLeagues.add(l));
         }
     });
