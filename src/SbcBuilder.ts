@@ -33,6 +33,11 @@ export interface EAItem {
   _personaId?: number;
 }
 
+export interface SolverSettings {
+    untradOnly: boolean;
+    excludedLeagues: number[];
+}
+
 export class SbcBuilder {
   private static _clubPlayersMemory: EAItem[] = [];
 
@@ -57,47 +62,26 @@ export class SbcBuilder {
     return (val?.value !== undefined ? val.value : val);
   }
 
-  /**
-   * Universal fetcher using intercepted search parameters
-   */
   public static fetchItems(criteriaParams: any): Promise<EAItem[]> {
     const win = (typeof unsafeWindow !== 'undefined' ? unsafeWindow : window) as any;
     return new Promise(r => {
       const criteria = new win.UTSearchCriteriaDTO();
-      // Match Intercepted Parameters
       const finalParams = Object.assign({
-        type: 'player',
-        count: 200,
-        excludeLoans: true,
-        isUntradeable: "true",
-        searchAltPositions: true,
-        sortBy: "ovr",
-        sort: "asc",
-        start: 0
+        type: 'player', count: 200, excludeLoans: true, isUntradeable: "true", searchAltPositions: true, sortBy: "ovr", sort: "asc"
       }, criteriaParams);
-      
       Object.assign(criteria, finalParams);
-      console.log(`[FC-SBC] Searching Club: ${JSON.stringify(finalParams)}`);
-
       win.services.Club.search(criteria).observe({ name: 'fetch' }, (obs: any, res: any) => {
         const raw = res.response?.items || res.items || res._collection || res;
-        const items = Array.isArray(raw) ? raw : (raw?._collection || Object.values(raw || {}));
-        r(items);
+        r(Array.isArray(raw) ? raw : (raw?._collection || Object.values(raw || {})));
       });
     });
   }
 
-  /**
-   * Sync Inventory with Active Discovery
-   */
   public static async primeInventory(targetLevels: string[] = []): Promise<{ total: number, storage: number, unassigned: number }> {
     const win = (typeof unsafeWindow !== 'undefined' ? unsafeWindow : window) as any;
     const repo = win.repositories.Item;
     if (!repo) return { total: 0, storage: 0, unassigned: 0 };
 
-    console.log("[FC-SBC] Starting Discovery Sync...");
-    
-    // 1. Initial Storage Scan
     const storageCriteria = new win.UTSearchCriteriaDTO();
     storageCriteria.type = 'player';
     const storageItems = await new Promise<any[]>(r => {
@@ -107,12 +91,10 @@ export class SbcBuilder {
         });
     });
 
-    // 2. Targeted Club Searches (Active Discovery)
-    const clubFetches = [this.fetchItems({ count: 250 })]; // Global first 250
+    const clubFetches = [this.fetchItems({ count: 250 })];
     targetLevels.forEach(lvl => clubFetches.push(this.fetchItems({ level: lvl, count: 250 })));
     const clubResults = await Promise.all(clubFetches);
 
-    // 3. Entity Mapping
     const allPlayers = new Map<number, EAItem>();
     let storageCount = 0; let unassignedCount = 0;
 
@@ -130,13 +112,25 @@ export class SbcBuilder {
     };
 
     addEntities(storageItems, 'storage');
-    const unassignedRaw = repo.unassigned?._collection || repo.unassigned || [];
-    addEntities(Array.isArray(unassignedRaw) ? unassignedRaw : Object.values(unassignedRaw), 'unassigned');
+    const unRaw = repo.unassigned?._collection || repo.unassigned || [];
+    addEntities(Array.isArray(unRaw) ? unRaw : Object.values(unRaw), 'unassigned');
     clubResults.forEach(list => addEntities(list, 'club'));
 
     this._clubPlayersMemory = Array.from(allPlayers.values());
-    console.log(`[FC-SBC] Sync Complete: ${this._clubPlayersMemory.length} players found (${storageCount} in Storage).`);
     return { total: this._clubPlayersMemory.length, storage: storageCount, unassigned: unassignedCount };
+  }
+
+  public static async saveSquad(challenge: any, squad: any, controller: any): Promise<boolean> {
+    const win = (typeof unsafeWindow !== 'undefined' ? unsafeWindow : window) as any;
+    challenge.squad = squad;
+    return new Promise((resolve) => {
+      win.services.SBC.saveChallenge(challenge).observe({ name: 'Save' }, (obs: any, res: any) => {
+        squad.onDataUpdated.notify();
+        if (squad.isValid) squad.isValid();
+        if (controller._pushSquadToView) controller._pushSquadToView(squad);
+        resolve(res.success);
+      });
+    });
   }
 
   public static calculateRating(items: (EAItem | null)[]): number {
@@ -156,23 +150,8 @@ export class SbcBuilder {
     return map[rawId] || rawId;
   }
 
-  public static async saveSquad(challenge: any, squad: any, controller: any): Promise<boolean> {
-    const win = (typeof unsafeWindow !== 'undefined' ? unsafeWindow : window) as any;
-    challenge.squad = squad;
-    console.log("[FC-SBC] Executing Server-Side Save...");
-    return new Promise((resolve) => {
-      win.services.SBC.saveChallenge(challenge).observe({ name: 'Save' }, (obs: any, res: any) => {
-        squad.onDataUpdated.notify();
-        if (squad.isValid) squad.isValid();
-        if (controller._pushSquadToView) controller._pushSquadToView(squad);
-        console.log(`[FC-SBC] Server-Side Persist: ${res.success}`);
-        resolve(res.success);
-      });
-    });
-  }
-
   // --- SOLVER: EFFICIENT ---
-  public static async solveEfficient(log: (m: string) => void, settings: { untradOnly: boolean }) {
+  public static async solveEfficient(log: (m: string) => void, settings: SolverSettings) {
     const ctx = this.getSbcContext();
     if (!ctx) return log("❌ SBC Screen Not Found");
     const { challenge, squad, controller } = ctx;
@@ -185,17 +164,16 @@ export class SbcBuilder {
     const levelsToDiscover = new Set<string>();
 
     rawReqs.forEach((r: any) => {
-        const label = (r.requirementLabel || "").toLowerCase();
-        const col = r.kvPairs._collection || r.kvPairs;
         const rules: any[] = [];
+        const col = r.kvPairs._collection || r.kvPairs;
         for (let k in col) rules.push({ key: parseInt(k), value: this.getCleanValue(col[k]) });
 
-        const isRare = rules.some(rl => (rl.key === 25 && rl.value.includes(4)) || (rl.key === 18 && rl.value.includes(1))) || label.includes("rare");
+        const isRare = rules.some(rl => (rl.key === 25 && rl.value.includes(4)) || (rl.key === 18 && rl.value.includes(1)));
         if (isRare) minRaresNeeded = Math.max(minRaresNeeded, r.count || 0);
 
-        const bronze = rules.some(rl => (rl.key === 17 && rl.value.includes(1)) || (rl.key === 3 && rl.value.includes(1))) || label.includes("bronze");
-        const silver = rules.some(rl => (rl.key === 17 && rl.value.includes(2)) || (rl.key === 3 && rl.value.includes(2))) || label.includes("silver");
-        const gold = rules.some(rl => (rl.key === 17 && rl.value.includes(3)) || (rl.key === 3 && rl.value.includes(3))) || label.includes("gold");
+        const bronze = rules.some(rl => (rl.key === 17 && rl.value.includes(1)) || (rl.key === 3 && rl.value.includes(1)));
+        const silver = rules.some(rl => (rl.key === 17 && rl.value.includes(2)) || (rl.key === 3 && rl.value.includes(2)));
+        const gold = rules.some(rl => (rl.key === 17 && rl.value.includes(3)) || (rl.key === 3 && rl.value.includes(3)));
 
         const bInfo = bronze ? { level: "bronze", min: 0, max: 64 } : (silver ? { level: "silver", min: 65, max: 74 } : (gold ? { level: "gold", min: 75, max: 82 } : null));
         if (bInfo) {
@@ -206,21 +184,20 @@ export class SbcBuilder {
     });
 
     if (buckets.length === 0 && !globalLevel) globalLevel = { level: "gold", min: 75, max: 82 };
-    
-    log(`Discovered Tiers: ${Array.from(levelsToDiscover).join(', ')}`);
     await this.primeInventory(Array.from(levelsToDiscover));
+
+    const pool = this._clubPlayersMemory.filter(p => {
+        if (settings.untradOnly && p.tradable !== false) return false;
+        if (settings.excludedLeagues.includes(p.leagueId!)) return false;
+        if (p.limitedUseType === 2 || !!p.evolutionInfo || p.rareflag > 1) return false;
+        return true;
+    }).sort((a,b) => (a._sourcePriority! - b._sourcePriority!) || (a.rating - b.rating));
 
     const usedPersonaIds = new Set<number>();
     const usedIds = new Set<number>();
     const activeSlots = squad.getSBCSlots().filter((s: any) => !s.isBrick() && s.index <= 10);
     const selected: (EAItem | null)[] = new Array(activeSlots.length).fill(null);
     let raresInserted = 0;
-
-    const pool = this._clubPlayersMemory.filter(p => {
-        if (settings.untradOnly && p.tradable !== false) return false;
-        if (p.limitedUseType === 2 || !!p.evolutionInfo || p.rareflag > 1) return false;
-        return true;
-    }).sort((a,b) => (a._sourcePriority! - b._sourcePriority!) || (a.rating - b.rating));
 
     const findMatch = (lvl: any, rareflag: number, ignoreRarity = false) => {
       return pool.find(p => {
@@ -231,18 +208,13 @@ export class SbcBuilder {
       });
     };
 
-    // Bucket Pass
-    const targetBuckets = [...buckets, ...(globalLevel ? [{ ...globalLevel, count: 11 }] : [])];
-    targetBuckets.forEach(bucket => {
+    [...buckets, ...(globalLevel ? [{ ...globalLevel, count: 11 }] : [])].forEach(bucket => {
       let count = 0;
-      const targetCount = (bucket.count === 11 || bucket.count === -1) ? activeSlots.length : bucket.count;
-      
       activeSlots.forEach((slot: any, i: number) => {
-        if (selected[i] || count >= targetCount) return;
+        if (selected[i] || count >= (bucket.count === 11 || bucket.count === -1 ? activeSlots.length : bucket.count)) return;
         let match = (raresInserted < minRaresNeeded) ? findMatch(bucket, 1) : findMatch(bucket, 0, bucket.level !== 'gold');
         if (!match) match = findMatch(bucket, 0, true);
         if (match) {
-          console.log(`[DECISION] Slot ${slot.index}: ${match.rareflag ? 'RARE' : 'COMMON'} ${match._staticData?.name} (${match.rating}) [Source: ${match._sourceType}]`);
           selected[i] = match; usedIds.add(match.id); usedPersonaIds.add(match._personaId!);
           count++; if (match.rareflag) raresInserted++;
         }
@@ -257,12 +229,12 @@ export class SbcBuilder {
   }
 
   // --- SOLVER: DE-CLOGGER ---
-  public static async solveDeClogger(log: (m: string) => void, settings: { untradOnly: boolean }) {
+  public static async solveDeClogger(log: (m: string) => void, settings: SolverSettings) {
     const ctx = this.getSbcContext();
     if (!ctx) return log("❌ SBC Screen Not Found");
     const { challenge, squad, controller } = ctx;
 
-    log("Analyzing Anchor...");
+    log("Checking Anchor...");
     let isTotwRequired = false;
     (challenge.eligibilityRequirements || []).forEach((r: any) => {
         const rules = this.getCleanValue(r.kvPairs._collection || r.kvPairs);
@@ -273,6 +245,7 @@ export class SbcBuilder {
 
     const pool = this._clubPlayersMemory.filter(p => {
         if (settings.untradOnly && p.tradable !== false) return false;
+        if (settings.excludedLeagues.includes(p.leagueId!)) return false;
         if (p.rating >= 89 || !!p.evolutionInfo || p.rareflag === 116) return false;
         return true;
     }).sort((a,b) => (a._sourcePriority! - b._sourcePriority!) || (a.rating - b.rating));
@@ -284,13 +257,14 @@ export class SbcBuilder {
 
     let anchor = isTotwRequired ? pool.find(p => p.rarityId === 3 || p.rareflag === 3) : pool.find(p => p.rating >= 87 && p.rating <= 88 && p.rareflag === 1);
     if (anchor) {
-        console.log(`[DECISION] Anchor: ${anchor._staticData?.name} (${anchor.rating})`);
         selected[0] = anchor; usedIds.add(anchor.id); usedPersonaIds.add(anchor._personaId!);
+    } else {
+        return log("❌ No valid Anchor found.");
     }
 
     const clogs = { 83: 0, 84: 0 };
     pool.forEach(p => { if (p._sourceType === 'storage' && (p.rating === 83 || p.rating === 84)) (clogs as any)[p.rating]++; });
-    let pattern = (anchor && anchor.rating >= 88) ? [{ r: 83, c: 10 }] : (clogs[84] >= 6 ? [{ r: 84, c: 6 }, { r: 83, c: 4 }] : [{ r: 87, c: 1 }, { r: 83, c: 9 }]);
+    let pattern = (anchor.rating >= 88) ? [{ r: 83, c: 10 }] : (clogs[84] >= 6 ? [{ r: 84, c: 6 }, { r: 83, c: 4 }] : [{ r: 87, c: 1 }, { r: 83, c: 9 }]);
 
     pattern.forEach(pReq => {
         let count = 0;
@@ -316,7 +290,7 @@ export class SbcBuilder {
   }
 
   // --- SOLVER: LEAGUE ---
-  public static async solveLeague(log: (m: string) => void, settings: { untradOnly: boolean }) {
+  public static async solveLeague(log: (m: string) => void, settings: SolverSettings) {
     const ctx = this.getSbcContext();
     if (!ctx) return log("❌ SBC Screen Not Found");
     const { challenge, squad, controller } = ctx;
@@ -331,15 +305,14 @@ export class SbcBuilder {
         }
     });
 
-    // Active league discovery
     const discoveryLeagues = Array.from(detectedLeagues).slice(0, 3);
-    const discoveryFetches = discoveryLeagues.map(l => this.fetchItems({ league: l, count: 150 }));
-    await Promise.all(discoveryFetches);
+    await Promise.all(discoveryLeagues.map(l => this.fetchItems({ league: l, count: 150 })));
     await this.primeInventory();
     
     const globalLeagues = Array.from(detectedLeagues);
     const pool = this._clubPlayersMemory.filter(p => {
         if (settings.untradOnly && p.tradable !== false) return false;
+        if (settings.excludedLeagues.includes(p.leagueId!)) return false;
         if (p.rating >= 83 || !!p.evolutionInfo) return false;
         if (globalLeagues.length > 0 && !globalLeagues.includes(p.leagueId!)) return false;
         return true;
@@ -361,16 +334,12 @@ export class SbcBuilder {
                 return true;
             });
             if (match) { 
-                console.log(`[DECISION] Slot ${slot.index}: ${match._staticData?.name} [Pos Match: ${matchPos}]`);
                 selected[i] = match; usedIds.add(match.id); usedPersonaIds.add(match._personaId!); 
             }
         });
     };
 
-    fill('storage', true);
-    fill('storage', false);
-    fill('club', true);
-    fill('club', false);
+    fill('storage', true); fill('storage', false); fill('club', true); fill('club', false);
 
     const finalArray = new Array(23).fill(null);
     activeSlots.forEach((slot: any, i: number) => { if (selected[i]) finalArray[slot.index] = selected[i]; });

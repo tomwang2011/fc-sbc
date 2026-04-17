@@ -453,7 +453,7 @@
       if (Array.isArray(val)) return val.map((v2) => v2?.value !== void 0 ? v2.value : v2);
       return val?.value !== void 0 ? val.value : val;
     }
-static fetchItems(criteriaParams) {
+    static fetchItems(criteriaParams) {
       const win = typeof unsafeWindow !== "undefined" ? unsafeWindow : window;
       return new Promise((r2) => {
         const criteria = new win.UTSearchCriteriaDTO();
@@ -464,23 +464,19 @@ static fetchItems(criteriaParams) {
           isUntradeable: "true",
           searchAltPositions: true,
           sortBy: "ovr",
-          sort: "asc",
-          start: 0
+          sort: "asc"
         }, criteriaParams);
         Object.assign(criteria, finalParams);
-        console.log(`[FC-SBC] Searching Club: ${JSON.stringify(finalParams)}`);
         win.services.Club.search(criteria).observe({ name: "fetch" }, (obs, res) => {
           const raw = res.response?.items || res.items || res._collection || res;
-          const items = Array.isArray(raw) ? raw : raw?._collection || Object.values(raw || {});
-          r2(items);
+          r2(Array.isArray(raw) ? raw : raw?._collection || Object.values(raw || {}));
         });
       });
     }
-static async primeInventory(targetLevels = []) {
+    static async primeInventory(targetLevels = []) {
       const win = typeof unsafeWindow !== "undefined" ? unsafeWindow : window;
       const repo = win.repositories.Item;
       if (!repo) return { total: 0, storage: 0, unassigned: 0 };
-      console.log("[FC-SBC] Starting Discovery Sync...");
       const storageCriteria = new win.UTSearchCriteriaDTO();
       storageCriteria.type = "player";
       const storageItems = await new Promise((r2) => {
@@ -508,12 +504,23 @@ static async primeInventory(targetLevels = []) {
         });
       };
       addEntities(storageItems, "storage");
-      const unassignedRaw = repo.unassigned?._collection || repo.unassigned || [];
-      addEntities(Array.isArray(unassignedRaw) ? unassignedRaw : Object.values(unassignedRaw), "unassigned");
+      const unRaw = repo.unassigned?._collection || repo.unassigned || [];
+      addEntities(Array.isArray(unRaw) ? unRaw : Object.values(unRaw), "unassigned");
       clubResults.forEach((list) => addEntities(list, "club"));
       this._clubPlayersMemory = Array.from(allPlayers.values());
-      console.log(`[FC-SBC] Sync Complete: ${this._clubPlayersMemory.length} players found (${storageCount} in Storage).`);
       return { total: this._clubPlayersMemory.length, storage: storageCount, unassigned: unassignedCount };
+    }
+    static async saveSquad(challenge, squad, controller) {
+      const win = typeof unsafeWindow !== "undefined" ? unsafeWindow : window;
+      challenge.squad = squad;
+      return new Promise((resolve) => {
+        win.services.SBC.saveChallenge(challenge).observe({ name: "Save" }, (obs, res) => {
+          squad.onDataUpdated.notify();
+          if (squad.isValid) squad.isValid();
+          if (controller._pushSquadToView) controller._pushSquadToView(squad);
+          resolve(res.success);
+        });
+      });
     }
     static calculateRating(items) {
       const active = items.filter((p2) => p2 !== null);
@@ -533,20 +540,6 @@ static async primeInventory(targetLevels = []) {
       const map = { 2: 3, 8: 7, 4: 5, 6: 5, 9: 10, 11: 10, 13: 14, 15: 14, 17: 18, 19: 18, 20: 21, 22: 21, 24: 25, 26: 25 };
       return map[rawId] || rawId;
     }
-    static async saveSquad(challenge, squad, controller) {
-      const win = typeof unsafeWindow !== "undefined" ? unsafeWindow : window;
-      challenge.squad = squad;
-      console.log("[FC-SBC] Executing Server-Side Save...");
-      return new Promise((resolve) => {
-        win.services.SBC.saveChallenge(challenge).observe({ name: "Save" }, (obs, res) => {
-          squad.onDataUpdated.notify();
-          if (squad.isValid) squad.isValid();
-          if (controller._pushSquadToView) controller._pushSquadToView(squad);
-          console.log(`[FC-SBC] Server-Side Persist: ${res.success}`);
-          resolve(res.success);
-        });
-      });
-    }
 static async solveEfficient(log, settings) {
       const ctx = this.getSbcContext();
       if (!ctx) return log("❌ SBC Screen Not Found");
@@ -558,15 +551,14 @@ static async solveEfficient(log, settings) {
       let globalLevel = null;
       const levelsToDiscover = new Set();
       rawReqs.forEach((r2) => {
-        const label = (r2.requirementLabel || "").toLowerCase();
-        const col = r2.kvPairs._collection || r2.kvPairs;
         const rules = [];
+        const col = r2.kvPairs._collection || r2.kvPairs;
         for (let k2 in col) rules.push({ key: parseInt(k2), value: this.getCleanValue(col[k2]) });
-        const isRare = rules.some((rl) => rl.key === 25 && rl.value.includes(4) || rl.key === 18 && rl.value.includes(1)) || label.includes("rare");
+        const isRare = rules.some((rl) => rl.key === 25 && rl.value.includes(4) || rl.key === 18 && rl.value.includes(1));
         if (isRare) minRaresNeeded = Math.max(minRaresNeeded, r2.count || 0);
-        const bronze = rules.some((rl) => rl.key === 17 && rl.value.includes(1) || rl.key === 3 && rl.value.includes(1)) || label.includes("bronze");
-        const silver = rules.some((rl) => rl.key === 17 && rl.value.includes(2) || rl.key === 3 && rl.value.includes(2)) || label.includes("silver");
-        const gold = rules.some((rl) => rl.key === 17 && rl.value.includes(3) || rl.key === 3 && rl.value.includes(3)) || label.includes("gold");
+        const bronze = rules.some((rl) => rl.key === 17 && rl.value.includes(1) || rl.key === 3 && rl.value.includes(1));
+        const silver = rules.some((rl) => rl.key === 17 && rl.value.includes(2) || rl.key === 3 && rl.value.includes(2));
+        const gold = rules.some((rl) => rl.key === 17 && rl.value.includes(3) || rl.key === 3 && rl.value.includes(3));
         const bInfo = bronze ? { level: "bronze", min: 0, max: 64 } : silver ? { level: "silver", min: 65, max: 74 } : gold ? { level: "gold", min: 75, max: 82 } : null;
         if (bInfo) {
           levelsToDiscover.add(bInfo.level);
@@ -575,18 +567,18 @@ static async solveEfficient(log, settings) {
         }
       });
       if (buckets.length === 0 && !globalLevel) globalLevel = { level: "gold", min: 75, max: 82 };
-      log(`Discovered Tiers: ${Array.from(levelsToDiscover).join(", ")}`);
       await this.primeInventory(Array.from(levelsToDiscover));
+      const pool = this._clubPlayersMemory.filter((p2) => {
+        if (settings.untradOnly && p2.tradable !== false) return false;
+        if (settings.excludedLeagues.includes(p2.leagueId)) return false;
+        if (p2.limitedUseType === 2 || !!p2.evolutionInfo || p2.rareflag > 1) return false;
+        return true;
+      }).sort((a2, b2) => a2._sourcePriority - b2._sourcePriority || a2.rating - b2.rating);
       const usedPersonaIds = new Set();
       const usedIds = new Set();
       const activeSlots = squad.getSBCSlots().filter((s2) => !s2.isBrick() && s2.index <= 10);
       const selected = new Array(activeSlots.length).fill(null);
       let raresInserted = 0;
-      const pool = this._clubPlayersMemory.filter((p2) => {
-        if (settings.untradOnly && p2.tradable !== false) return false;
-        if (p2.limitedUseType === 2 || !!p2.evolutionInfo || p2.rareflag > 1) return false;
-        return true;
-      }).sort((a2, b2) => a2._sourcePriority - b2._sourcePriority || a2.rating - b2.rating);
       const findMatch = (lvl, rareflag, ignoreRarity = false) => {
         return pool.find((p2) => {
           if (usedIds.has(p2.id) || usedPersonaIds.has(p2._personaId)) return false;
@@ -595,16 +587,13 @@ static async solveEfficient(log, settings) {
           return true;
         });
       };
-      const targetBuckets = [...buckets, ...globalLevel ? [{ ...globalLevel, count: 11 }] : []];
-      targetBuckets.forEach((bucket) => {
+      [...buckets, ...globalLevel ? [{ ...globalLevel, count: 11 }] : []].forEach((bucket) => {
         let count = 0;
-        const targetCount = bucket.count === 11 || bucket.count === -1 ? activeSlots.length : bucket.count;
         activeSlots.forEach((slot, i2) => {
-          if (selected[i2] || count >= targetCount) return;
+          if (selected[i2] || count >= (bucket.count === 11 || bucket.count === -1 ? activeSlots.length : bucket.count)) return;
           let match = raresInserted < minRaresNeeded ? findMatch(bucket, 1) : findMatch(bucket, 0, bucket.level !== "gold");
           if (!match) match = findMatch(bucket, 0, true);
           if (match) {
-            console.log(`[DECISION] Slot ${slot.index}: ${match.rareflag ? "RARE" : "COMMON"} ${match._staticData?.name} (${match.rating}) [Source: ${match._sourceType}]`);
             selected[i2] = match;
             usedIds.add(match.id);
             usedPersonaIds.add(match._personaId);
@@ -625,7 +614,7 @@ static async solveDeClogger(log, settings) {
       const ctx = this.getSbcContext();
       if (!ctx) return log("❌ SBC Screen Not Found");
       const { challenge, squad, controller } = ctx;
-      log("Analyzing Anchor...");
+      log("Checking Anchor...");
       let isTotwRequired = false;
       (challenge.eligibilityRequirements || []).forEach((r2) => {
         const rules = this.getCleanValue(r2.kvPairs._collection || r2.kvPairs);
@@ -634,6 +623,7 @@ static async solveDeClogger(log, settings) {
       await this.primeInventory(isTotwRequired ? ["special"] : ["gold"]);
       const pool = this._clubPlayersMemory.filter((p2) => {
         if (settings.untradOnly && p2.tradable !== false) return false;
+        if (settings.excludedLeagues.includes(p2.leagueId)) return false;
         if (p2.rating >= 89 || !!p2.evolutionInfo || p2.rareflag === 116) return false;
         return true;
       }).sort((a2, b2) => a2._sourcePriority - b2._sourcePriority || a2.rating - b2.rating);
@@ -643,16 +633,17 @@ static async solveDeClogger(log, settings) {
       const selected = new Array(activeSlots.length).fill(null);
       let anchor = isTotwRequired ? pool.find((p2) => p2.rarityId === 3 || p2.rareflag === 3) : pool.find((p2) => p2.rating >= 87 && p2.rating <= 88 && p2.rareflag === 1);
       if (anchor) {
-        console.log(`[DECISION] Anchor: ${anchor._staticData?.name} (${anchor.rating})`);
         selected[0] = anchor;
         usedIds.add(anchor.id);
         usedPersonaIds.add(anchor._personaId);
+      } else {
+        return log("❌ No valid Anchor found.");
       }
       const clogs = { 83: 0, 84: 0 };
       pool.forEach((p2) => {
         if (p2._sourceType === "storage" && (p2.rating === 83 || p2.rating === 84)) clogs[p2.rating]++;
       });
-      let pattern = anchor && anchor.rating >= 88 ? [{ r: 83, c: 10 }] : clogs[84] >= 6 ? [{ r: 84, c: 6 }, { r: 83, c: 4 }] : [{ r: 87, c: 1 }, { r: 83, c: 9 }];
+      let pattern = anchor.rating >= 88 ? [{ r: 83, c: 10 }] : clogs[84] >= 6 ? [{ r: 84, c: 6 }, { r: 83, c: 4 }] : [{ r: 87, c: 1 }, { r: 83, c: 9 }];
       pattern.forEach((pReq) => {
         let count = 0;
         pool.filter((p2) => p2.rating === pReq.r && p2.rareflag <= 1).forEach((p2) => {
@@ -696,12 +687,12 @@ static async solveLeague(log, settings) {
         }
       });
       const discoveryLeagues = Array.from(detectedLeagues).slice(0, 3);
-      const discoveryFetches = discoveryLeagues.map((l2) => this.fetchItems({ league: l2, count: 150 }));
-      await Promise.all(discoveryFetches);
+      await Promise.all(discoveryLeagues.map((l2) => this.fetchItems({ league: l2, count: 150 })));
       await this.primeInventory();
       const globalLeagues = Array.from(detectedLeagues);
       const pool = this._clubPlayersMemory.filter((p2) => {
         if (settings.untradOnly && p2.tradable !== false) return false;
+        if (settings.excludedLeagues.includes(p2.leagueId)) return false;
         if (p2.rating >= 83 || !!p2.evolutionInfo) return false;
         if (globalLeagues.length > 0 && !globalLeagues.includes(p2.leagueId)) return false;
         return true;
@@ -721,7 +712,6 @@ static async solveLeague(log, settings) {
             return true;
           });
           if (match) {
-            console.log(`[DECISION] Slot ${slot.index}: ${match._staticData?.name} [Pos Match: ${matchPos}]`);
             selected[i2] = match;
             usedIds.add(match.id);
             usedPersonaIds.add(match._personaId);
@@ -748,20 +738,31 @@ static async solveLeague(log, settings) {
     const [status, setStatus] = d("Ready for action.");
     const [stats, setStats] = d({ total: 0, sbcStorage: 0, unassigned: 0 });
     const [untradOnly, setUntradOnly] = d(true);
+    const [excludedLeagues, setExcludedLeagues] = d([]);
+    const leagues = [
+      { id: 13, name: "PL" },
+      { id: 53, name: "ESP1" },
+      { id: 19, name: "GER1" },
+      { id: 31, name: "ITA1" },
+      { id: 16, name: "FRA1" },
+      { id: 10, name: "NED1" },
+      { id: 308, name: "POR1" },
+      { id: 4, name: "BEL1" }
+    ];
+    const toggleLeague = (id) => {
+      setExcludedLeagues(
+        (prev) => prev.includes(id) ? prev.filter((l2) => l2 !== id) : [...prev, id]
+      );
+    };
     const handleScan = async () => {
       setIsScanning(true);
       setStatus("Syncing Inventory...");
       try {
         await new Promise((r2) => setTimeout(r2, 100));
         const res = await SbcBuilder.primeInventory();
-        setStats({
-          total: res.total,
-          sbcStorage: res.storage,
-          unassigned: res.unassigned
-        });
+        setStats({ total: res.total, sbcStorage: res.storage, unassigned: res.unassigned });
         setStatus("Inventory Sync Complete.");
       } catch (e2) {
-        console.error("[FC-SBC] Scan error:", e2.message);
         setStatus("❌ Sync Failed.");
       } finally {
         setIsScanning(false);
@@ -778,12 +779,11 @@ static async solveLeague(log, settings) {
         };
         await solverMap[type](
           (msg) => setStatus(msg),
-          { untradOnly }
+          { untradOnly, excludedLeagues }
         );
         const res = await SbcBuilder.primeInventory();
         setStats({ total: res.total, sbcStorage: res.storage, unassigned: res.unassigned });
       } catch (e2) {
-        console.error("[FC-SBC] Solve error:", e2);
         setStatus(`❌ Error: ${e2.message}`);
       } finally {
         setIsSolving(false);
@@ -797,89 +797,113 @@ u$1(
             setShowBuilder(!showBuilder);
             if (!showBuilder && stats.total === 0) handleScan();
           },
-          className: "bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg shadow-xl transition-all hover:scale-105 flex items-center gap-2 border border-white/20",
+          style: { background: "#4f46e5", opacity: "1 !important" },
+          className: "text-white font-bold py-2 px-4 rounded-lg shadow-xl transition-all hover:scale-105 flex items-center gap-2 border border-white/20",
           children: [
 u$1("span", { className: "text-xl", children: "⚡" }),
 u$1("span", { children: showBuilder ? "CLOSE" : "SBC SOLVER" })
           ]
         }
       ),
-      showBuilder && u$1("div", { className: "absolute top-14 left-0 w-80 bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl p-4 overflow-hidden animate-in fade-in slide-in-from-top-4", children: [
+      showBuilder && u$1(
+        "div",
+        {
+          style: { backgroundColor: "#09090b", opacity: "1 !important", border: "1px solid #3f3f46" },
+          className: "absolute top-14 left-0 w-80 rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.7)] p-4 overflow-hidden animate-in fade-in slide-in-from-top-4",
+          children: [
 u$1("div", { className: "flex justify-between items-center mb-4", children: [
-u$1("h2", { className: "text-lg font-bold text-white", children: "SBC Master Tool" }),
+u$1("h2", { className: "text-lg font-black text-white tracking-tight uppercase", children: "SBC Master Tool" }),
 u$1(
-            "button",
-            {
-              onClick: handleScan,
-              disabled: isScanning,
-              className: `text-xs ${isScanning ? "animate-spin opacity-50" : ""} bg-zinc-800 p-1.5 rounded-md hover:bg-zinc-700 text-zinc-400`,
-              children: "🔄"
-            }
-          )
-        ] }),
+                "button",
+                {
+                  onClick: handleScan,
+                  disabled: isScanning,
+                  style: { background: "#27272a" },
+                  className: `text-xs ${isScanning ? "animate-spin opacity-50" : ""} p-1.5 rounded-md hover:bg-zinc-700 text-zinc-300 border border-zinc-600`,
+                  children: "🔄"
+                }
+              )
+            ] }),
 u$1("div", { className: "space-y-4", children: [
 u$1("div", { className: "grid grid-cols-3 gap-2", children: [
-u$1("div", { className: "p-2 bg-zinc-800/50 rounded-lg text-center border border-zinc-800", children: [
-u$1("div", { className: "text-[10px] text-zinc-500 uppercase", children: "Club" }),
-u$1("div", { className: "font-bold text-white", children: stats.total })
-            ] }),
-u$1("div", { className: "p-2 bg-blue-900/10 rounded-lg text-center border border-blue-900/30", children: [
-u$1("div", { className: "text-[10px] text-blue-500 uppercase", children: "Storage" }),
-u$1("div", { className: "font-bold text-blue-400", children: stats.sbcStorage })
-            ] }),
-u$1("div", { className: "p-2 bg-orange-900/10 rounded-lg text-center border border-orange-900/30", children: [
-u$1("div", { className: "text-[10px] text-orange-500 uppercase", children: "Unassgn" }),
-u$1("div", { className: "font-bold text-orange-400", children: stats.unassigned })
-            ] })
-          ] }),
-u$1("div", { className: "bg-zinc-800/30 p-2 rounded-lg border border-zinc-800/50", children: u$1("label", { className: "flex items-center gap-3 cursor-pointer group", children: [
+u$1("div", { style: { background: "#18181b" }, className: "p-2 rounded-lg text-center border border-zinc-800", children: [
+u$1("div", { className: "text-[10px] text-zinc-500 font-bold uppercase", children: "Club" }),
+u$1("div", { className: "font-bold text-white text-lg", children: stats.total })
+                ] }),
+u$1("div", { style: { background: "#172554" }, className: "p-2 rounded-lg text-center border border-blue-900", children: [
+u$1("div", { className: "text-[10px] text-blue-400 font-bold uppercase", children: "Storage" }),
+u$1("div", { className: "font-bold text-blue-300 text-lg", children: stats.sbcStorage })
+                ] }),
+u$1("div", { style: { background: "#431407" }, className: "p-2 rounded-lg text-center border border-orange-950", children: [
+u$1("div", { className: "text-[10px] text-orange-400 font-bold uppercase", children: "Unassgn" }),
+u$1("div", { className: "font-bold text-orange-300 text-lg", children: stats.unassigned })
+                ] })
+              ] }),
+u$1("div", { style: { background: "#18181b" }, className: "p-3 rounded-lg border border-zinc-800", children: [
+u$1("h3", { className: "text-[10px] font-black text-zinc-500 uppercase mb-2 tracking-widest", children: "Ignore Leagues" }),
+u$1("div", { className: "grid grid-cols-4 gap-1.5", children: leagues.map((l2) => u$1(
+                  "button",
+                  {
+                    onClick: () => toggleLeague(l2.id),
+                    style: { background: excludedLeagues.includes(l2.id) ? "#dc2626" : "#27272a" },
+                    className: `text-[9px] font-black py-1.5 rounded transition-colors ${excludedLeagues.includes(l2.id) ? "text-white border-red-800" : "text-zinc-400 border-zinc-700"} border`,
+                    children: l2.name
+                  }
+                )) })
+              ] }),
+u$1("div", { style: { background: "#18181b" }, className: "p-3 rounded-lg border border-zinc-800", children: u$1("label", { className: "flex items-center gap-3 cursor-pointer group", children: [
 u$1("div", { className: "relative", children: [
 u$1(
-                "input",
-                {
-                  type: "checkbox",
-                  className: "sr-only",
-                  checked: untradOnly,
-                  onChange: (e2) => setUntradOnly(e2.currentTarget.checked)
-                }
-              ),
+                    "input",
+                    {
+                      type: "checkbox",
+                      className: "sr-only",
+                      checked: untradOnly,
+                      onChange: (e2) => setUntradOnly(e2.currentTarget.checked)
+                    }
+                  ),
 u$1("div", { className: `w-10 h-5 rounded-full transition-colors ${untradOnly ? "bg-indigo-600" : "bg-zinc-700"}` }),
 u$1("div", { className: `absolute left-1 top-1 w-3 h-3 bg-white rounded-full transition-transform ${untradOnly ? "translate-x-5" : ""}` })
-            ] }),
-u$1("span", { className: "text-xs font-medium text-zinc-300 group-hover:text-white transition-colors", children: "Untradeable Only" })
-          ] }) }),
+                ] }),
+u$1("span", { className: "text-[10px] font-black text-zinc-300 group-hover:text-white transition-colors uppercase tracking-widest", children: "Untradeable Only" })
+              ] }) }),
 u$1("div", { className: "space-y-2 pt-2 border-t border-zinc-800", children: [
 u$1(
-              "button",
-              {
-                disabled: isSolving,
-                onClick: () => runSolver("league"),
-                className: "w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white py-2.5 rounded-lg text-xs font-bold shadow-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2",
-                children: "⚽ LEAGUE SOLVER"
-              }
-            ),
+                  "button",
+                  {
+                    disabled: isSolving,
+                    onClick: () => runSolver("league"),
+                    style: { background: "#4f46e5", borderBottom: "4px solid #3730a3" },
+                    className: "w-full hover:bg-indigo-500 disabled:opacity-50 text-white py-3 rounded-lg text-xs font-black shadow-lg transition-all active:translate-y-[2px] active:border-b-0 flex items-center justify-center gap-2",
+                    children: "⚽ LEAGUE SOLVER"
+                  }
+                ),
 u$1(
-              "button",
-              {
-                disabled: isSolving,
-                onClick: () => runSolver("declog"),
-                className: "w-full bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white py-2.5 rounded-lg text-xs font-bold shadow-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2",
-                children: "📦 DE-CLOGGER (83x14)"
-              }
-            ),
+                  "button",
+                  {
+                    disabled: isSolving,
+                    onClick: () => runSolver("declog"),
+                    style: { background: "#d97706", borderBottom: "4px solid #92400e" },
+                    className: "w-full hover:bg-amber-500 disabled:opacity-50 text-white py-3 rounded-lg text-xs font-black shadow-lg transition-all active:translate-y-[2px] active:border-b-0 flex items-center justify-center gap-2",
+                    children: "📦 DE-CLOGGER (83x14)"
+                  }
+                ),
 u$1(
-              "button",
-              {
-                disabled: isSolving,
-                onClick: () => runSolver("efficient"),
-                className: "w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white py-2.5 rounded-lg text-xs font-bold shadow-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2",
-                children: "💎 RARE/COMMON EFFICIENT"
-              }
-            )
-          ] }),
-u$1("div", { className: "mt-2 bg-black/40 rounded p-2.5 min-h-[40px] flex items-center justify-center border border-zinc-800/50", children: u$1("p", { className: "text-[10px] text-zinc-400 text-center leading-tight", children: status }) })
-        ] })
-      ] })
+                  "button",
+                  {
+                    disabled: isSolving,
+                    onClick: () => runSolver("efficient"),
+                    style: { background: "#059669", borderBottom: "4px solid #065f46" },
+                    className: "w-full hover:bg-emerald-500 disabled:opacity-50 text-white py-3 rounded-lg text-xs font-black shadow-lg transition-all active:translate-y-[2px] active:border-b-0 flex items-center justify-center gap-2",
+                    children: "💎 RARE/COMMON EFFICIENT"
+                  }
+                )
+              ] }),
+u$1("div", { style: { background: "#000000" }, className: "mt-2 rounded-lg p-3 min-h-[50px] flex items-center justify-center border border-zinc-800 shadow-inner", children: u$1("p", { className: "text-[11px] text-zinc-400 font-bold text-center leading-tight uppercase tracking-tight", children: status }) })
+            ] })
+          ]
+        }
+      )
     ] });
   }
   const styleCss = "@tailwind base;@tailwind components;@tailwind utilities;";
