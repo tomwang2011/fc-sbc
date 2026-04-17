@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC SBC Enhanced Builder
 // @namespace    fc-sbc-builder
-// @version      1.0.14
+// @version      1.0.15
 // @author       tomwang
 // @description  Optimal SBC builder with Storage-First priority
 // @license      ISC
@@ -429,31 +429,10 @@
   function D(n2, t2) {
     return "function" == typeof t2 ? t2(n2) : t2;
   }
-  class SbcBuilder {
+  class Inventory {
     static _clubPlayersMemory = [];
-    static getSbcContext() {
-      const win = typeof unsafeWindow !== "undefined" ? unsafeWindow : window;
-      try {
-        const root = win.getAppMain().getRootViewController();
-        const find = (n2) => {
-          if (!n2) return null;
-          if (n2._squad && n2._challenge) return n2;
-          const kids = [...n2.childViewControllers || [], ...n2.presentedViewController ? [n2.presentedViewController] : [], ...n2.currentController ? [n2.currentController] : [], ...n2._viewControllers || []];
-          for (const k2 of kids) {
-            const r2 = find(k2);
-            if (r2) return r2;
-          }
-          return null;
-        };
-        const controller = find(root);
-        return controller ? { challenge: controller._challenge, squad: controller._squad, controller } : null;
-      } catch (e2) {
-        return null;
-      }
-    }
-    static getCleanValue(val) {
-      if (Array.isArray(val)) return val.map((v2) => v2?.value !== void 0 ? v2.value : v2);
-      return val?.value !== void 0 ? val.value : val;
+    static get memory() {
+      return this._clubPlayersMemory;
     }
     static fetchItems(criteriaParams) {
       const win = typeof unsafeWindow !== "undefined" ? unsafeWindow : window;
@@ -514,18 +493,31 @@
       this._clubPlayersMemory = Array.from(allPlayers.values());
       return { total: this._clubPlayersMemory.length, storage: storageCount, unassigned: unassignedCount };
     }
-    static async saveSquad(challenge, squad, controller) {
+  }
+  class Utils {
+    static getSbcContext() {
       const win = typeof unsafeWindow !== "undefined" ? unsafeWindow : window;
-      challenge.squad = squad;
-      return new Promise((resolve) => {
-        win.services.SBC.saveChallenge(challenge).observe({ name: "Save" }, (obs, res) => {
-          squad.onDataUpdated.notify();
-          if (squad.isValid) squad.isValid();
-          if (controller._pushSquadToView) controller._pushSquadToView(squad);
-          else if (controller._overviewController?._pushSquadToView) controller._overviewController._pushSquadToView(squad);
-          resolve(res.success);
-        });
-      });
+      try {
+        const root = win.getAppMain().getRootViewController();
+        const find = (n2) => {
+          if (!n2) return null;
+          if (n2._squad && n2._challenge) return n2;
+          const kids = [...n2.childViewControllers || [], ...n2.presentedViewController ? [n2.presentedViewController] : [], ...n2.currentController ? [n2.currentController] : [], ...n2._viewControllers || []];
+          for (const k2 of kids) {
+            const r2 = find(k2);
+            if (r2) return r2;
+          }
+          return null;
+        };
+        const controller = find(root);
+        return controller ? { challenge: controller._challenge, squad: controller._squad, controller } : null;
+      } catch (e2) {
+        return null;
+      }
+    }
+    static getCleanValue(val) {
+      if (Array.isArray(val)) return val.map((v2) => v2?.value !== void 0 ? v2.value : v2);
+      return val?.value !== void 0 ? val.value : val;
     }
     static calculateRating(items) {
       const active = items.filter((p2) => p2 !== null);
@@ -545,8 +537,23 @@
       const map = { 2: 3, 8: 7, 4: 5, 6: 5, 9: 10, 11: 10, 13: 14, 15: 14, 17: 18, 19: 18, 20: 21, 22: 21, 24: 25, 26: 25 };
       return map[rawId] || rawId;
     }
-static async solveEfficient(log, settings) {
-      const ctx = this.getSbcContext();
+    static async saveSquad(challenge, squad, controller) {
+      const win = typeof unsafeWindow !== "undefined" ? unsafeWindow : window;
+      challenge.squad = squad;
+      return new Promise((resolve) => {
+        win.services.SBC.saveChallenge(challenge).observe({ name: "Save" }, (obs, res) => {
+          squad.onDataUpdated.notify();
+          if (squad.isValid) squad.isValid();
+          if (controller._pushSquadToView) controller._pushSquadToView(squad);
+          else if (controller._overviewController?._pushSquadToView) controller._overviewController._pushSquadToView(squad);
+          resolve(res.success);
+        });
+      });
+    }
+  }
+  class EfficientSolver {
+    static async solve(log, settings) {
+      const ctx = Utils.getSbcContext();
       if (!ctx) return log("❌ SBC Screen Not Found");
       const { challenge, squad, controller } = ctx;
       log("Analyzing Requirements...");
@@ -556,9 +563,9 @@ static async solveEfficient(log, settings) {
       let globalLevel = null;
       const levelsToDiscover = new Set();
       rawReqs.forEach((r2) => {
-        const col = r2.kvPairs._collection || r2.kvPairs;
         const rules = [];
-        for (let k2 in col) rules.push({ key: parseInt(k2), value: this.getCleanValue(col[k2]) });
+        const col = r2.kvPairs._collection || r2.kvPairs;
+        for (let k2 in col) rules.push({ key: parseInt(k2), value: Utils.getCleanValue(col[k2]) });
         const isRare = rules.some((rl) => rl.key === 25 && rl.value.includes(4) || rl.key === 18 && rl.value.includes(1));
         if (isRare) minRaresNeeded = Math.max(minRaresNeeded, r2.count || 0);
         const bronze = rules.some((rl) => rl.key === 17 && rl.value.includes(1) || rl.key === 3 && rl.value.includes(1));
@@ -572,8 +579,8 @@ static async solveEfficient(log, settings) {
         }
       });
       if (buckets.length === 0 && !globalLevel) globalLevel = { level: "gold", min: 75, max: 82 };
-      await this.primeInventory(Array.from(levelsToDiscover));
-      const pool = this._clubPlayersMemory.filter((p2) => {
+      if (Inventory.memory.length === 0) await Inventory.primeInventory(Array.from(levelsToDiscover));
+      const pool = Inventory.memory.filter((p2) => {
         if (settings.untradOnly && p2.tradable === true) return false;
         if (settings.excludedLeagues.includes(p2.leagueId)) return false;
         const isStandard = p2.rareflag === 0 || p2.rareflag === 1;
@@ -601,7 +608,7 @@ static async solveEfficient(log, settings) {
           let match = raresInserted < minRaresNeeded ? findMatch(bucket, 1) : findMatch(bucket, 0, bucket.level !== "gold");
           if (!match) match = findMatch(bucket, 0, true);
           if (match) {
-            console.log(`[DECISION] Slot ${slot.index}: ${match._staticData?.name} (${match.rating})`);
+            console.log(`[DECISION] Slot ${slot.index}: ${match.rareflag ? "RARE" : "COMMON"} ${match._staticData?.name} (${match.rating})`);
             selected[i2] = match;
             usedIds.add(match.id);
             usedPersonaIds.add(match._personaId);
@@ -615,11 +622,13 @@ static async solveEfficient(log, settings) {
         if (selected[i2]) finalArray[slot.index] = selected[i2];
       });
       squad.setPlayers(finalArray);
-      await this.saveSquad(challenge, squad, controller);
+      await Utils.saveSquad(challenge, squad, controller);
       log("✅ Solve Successful.");
     }
-static async solveDeClogger(log, settings) {
-      const ctx = this.getSbcContext();
+  }
+  class DeCloggerSolver {
+    static async solve(log, settings) {
+      const ctx = Utils.getSbcContext();
       if (!ctx) return log("❌ SBC Screen Not Found");
       const { challenge, squad, controller } = ctx;
       log("Analyzing Requirements...");
@@ -628,15 +637,15 @@ static async solveDeClogger(log, settings) {
       (challenge.eligibilityRequirements || []).forEach((r2) => {
         const col = r2.kvPairs._collection || r2.kvPairs;
         for (let k2 in col) {
-          const val = this.getCleanValue(col[k2]);
+          const val = Utils.getCleanValue(col[k2]);
           const key = parseInt(k2);
           if (key === 18 && (val === 3 || Array.isArray(val) && val.includes(3))) isTotwRequired = true;
           if (key === 19) targetRating = Math.max(targetRating, Number(Array.isArray(val) ? val[0] : val) || 0);
         }
       });
       log(`Target: ${targetRating} OVR | TOTW Required: ${isTotwRequired}`);
-      await this.primeInventory(isTotwRequired ? ["special"] : ["gold"]);
-      const pool = this._clubPlayersMemory.filter((p2) => {
+      await Inventory.primeInventory(isTotwRequired ? ["special"] : ["gold"]);
+      const pool = Inventory.memory.filter((p2) => {
         if (settings.untradOnly && p2.tradable === true) return false;
         if (settings.excludedLeagues.includes(p2.leagueId)) return false;
         if (p2.rating >= 89 || !!p2.evolutionInfo || p2.rareflag === 116) return false;
@@ -687,7 +696,7 @@ static async solveDeClogger(log, settings) {
         let optAttempts = 0;
         while (optAttempts < 50) {
           optAttempts++;
-          const currentRating = this.calculateRating(selected);
+          const currentRating = Utils.calculateRating(selected);
           if (currentRating <= targetRating) break;
           const ratings = selected.map((s2, idx) => ({ rating: s2.rating, index: idx })).filter((x2) => x2.index !== 0);
           const maxR = Math.max(...ratings.map((r2) => r2.rating));
@@ -697,7 +706,7 @@ static async solveDeClogger(log, settings) {
           if (downgrade) {
             const tempSquad = [...selected];
             tempSquad[downIdx] = downgrade;
-            if (this.calculateRating(tempSquad) >= targetRating) {
+            if (Utils.calculateRating(tempSquad) >= targetRating) {
               console.log(`[OPTIMIZE] Downgrading Slot ${downIdx}: ${currentItem.rating} -> ${downgrade.rating} (${downgrade._staticData?.name})`);
               usedIds.delete(currentItem.id);
               usedPersonaIds.delete(currentItem._personaId);
@@ -713,11 +722,13 @@ static async solveDeClogger(log, settings) {
         if (selected[i2]) finalArray[slot.index] = selected[i2];
       });
       squad.setPlayers(finalArray);
-      await this.saveSquad(challenge, squad, controller);
-      log(`✅ De-Clogger Complete. Rating: ${this.calculateRating(selected)}`);
+      await Utils.saveSquad(challenge, squad, controller);
+      log(`✅ De-Clogger Complete. Rating: ${Utils.calculateRating(selected)}`);
     }
-static async solveLeague(log, settings) {
-      const ctx = this.getSbcContext();
+  }
+  class LeagueSolver {
+    static async solve(log, settings) {
+      const ctx = Utils.getSbcContext();
       if (!ctx) return log("❌ SBC Screen Not Found");
       const { challenge, squad, controller } = ctx;
       log("Analyzing Target Rating...");
@@ -728,7 +739,7 @@ static async solveLeague(log, settings) {
       rawReqs.forEach((r2) => {
         const col = r2.kvPairs._collection || r2.kvPairs;
         for (let k2 in col) {
-          const val = this.getCleanValue(col[k2]);
+          const val = Utils.getCleanValue(col[k2]);
           const key = parseInt(k2);
           if (key === 19) targetRating = Math.max(targetRating, Number(Array.isArray(val) ? val[0] : val) || 0);
           if (key === 11) (Array.isArray(val) ? val : [val]).forEach((l2) => detectedLeagues.add(l2));
@@ -737,10 +748,10 @@ static async solveLeague(log, settings) {
       });
       log(`Goal: ${targetRating} OVR | Required Leagues: ${Array.from(detectedLeagues).join(",")}`);
       const discoveryLeagues = Array.from(detectedLeagues).slice(0, 3);
-      await Promise.all(discoveryLeagues.map((l2) => this.fetchItems({ league: l2, count: 150 })));
-      await this.primeInventory();
+      await Promise.all(discoveryLeagues.map((l2) => Inventory.fetchItems({ league: l2, count: 150 })));
+      await Inventory.primeInventory();
       const globalLeagues = Array.from(detectedLeagues);
-      const pool = this._clubPlayersMemory.filter((p2) => {
+      const pool = Inventory.memory.filter((p2) => {
         if (settings.untradOnly && p2.tradable === true) return false;
         if (settings.excludedLeagues.includes(p2.leagueId)) return false;
         if (p2.rating >= 83) return false;
@@ -756,11 +767,11 @@ static async solveLeague(log, settings) {
       const fillPass = (source, matchPos) => {
         activeSlots.forEach((slot, i2) => {
           if (selected[i2]) return;
-          const slotPos = SbcBuilder.normalizePos(slot.position?.id || slot._position);
+          const slotPos = Utils.normalizePos(slot.position?.id || slot._position);
           const match = pool.find((p2) => {
             if (usedIds.has(p2.id) || usedPersonaIds.has(p2._personaId)) return false;
             if (source && p2._sourceType !== source) return false;
-            if (matchPos && SbcBuilder.normalizePos(p2.preferredPosition) !== slotPos) return false;
+            if (matchPos && Utils.normalizePos(p2.preferredPosition) !== slotPos) return false;
             return true;
           });
           if (match) {
@@ -778,16 +789,16 @@ static async solveLeague(log, settings) {
       if (targetRating > 0) {
         log(`Balancing Rating to ${targetRating}...`);
         let bridgeAttempts = 0;
-        while (bridgeAttempts < 50 && this.calculateRating(selected) < targetRating) {
+        while (bridgeAttempts < 50 && Utils.calculateRating(selected) < targetRating) {
           bridgeAttempts++;
           const minR = Math.min(...selected.filter((s2) => s2).map((s2) => s2.rating));
           const upIdx = selected.findIndex((s2) => s2 && s2.rating === minR);
           if (upIdx === -1) break;
           const currentItem = selected[upIdx];
           const slot = activeSlots[upIdx];
-          const slotPos = SbcBuilder.normalizePos(slot.position?.id || slot._position);
-          const wasPosMatch = SbcBuilder.normalizePos(currentItem.preferredPosition) === slotPos;
-          let upgrade = pool.find((p2) => !usedIds.has(p2.id) && !usedPersonaIds.has(p2._personaId) && p2.rating > currentItem.rating && p2.leagueId === currentItem.leagueId && (wasPosMatch ? SbcBuilder.normalizePos(p2.preferredPosition) === slotPos : true));
+          const slotPos = Utils.normalizePos(slot.position?.id || slot._position);
+          const wasPosMatch = Utils.normalizePos(currentItem.preferredPosition) === slotPos;
+          let upgrade = pool.find((p2) => !usedIds.has(p2.id) && !usedPersonaIds.has(p2._personaId) && p2.rating > currentItem.rating && p2.leagueId === currentItem.leagueId && (wasPosMatch ? Utils.normalizePos(p2.preferredPosition) === slotPos : true));
           if (!upgrade) upgrade = pool.find((p2) => !usedIds.has(p2.id) && !usedPersonaIds.has(p2._personaId) && p2.rating > currentItem.rating && p2.leagueId === currentItem.leagueId);
           if (upgrade) {
             console.log(`[BRIDGE] Upgrading Slot ${slot.index}: ${currentItem.rating} -> ${upgrade.rating} (${upgrade._staticData?.name})`);
@@ -804,8 +815,22 @@ static async solveLeague(log, settings) {
         if (selected[i2]) finalArray[slot.index] = selected[i2];
       });
       squad.setPlayers(finalArray);
-      await this.saveSquad(challenge, squad, controller);
+      await Utils.saveSquad(challenge, squad, controller);
       log(`✅ League Solve Complete.`);
+    }
+  }
+  class SbcBuilder {
+    static async primeInventory(targetLevels = []) {
+      return await Inventory.primeInventory(targetLevels);
+    }
+    static async solveEfficient(log, settings) {
+      return await EfficientSolver.solve(log, settings);
+    }
+    static async solveDeClogger(log, settings) {
+      return await DeCloggerSolver.solve(log, settings);
+    }
+    static async solveLeague(log, settings) {
+      return await LeagueSolver.solve(log, settings);
     }
   }
   function App() {
@@ -920,7 +945,7 @@ u$1(
               className: "animate-in slide-in-from-left-4 fade-in duration-300",
               children: [
 u$1("div", { className: "flex justify-between items-center mb-6", children: [
-u$1("h2", { className: "text-xs font-black text-white tracking-widest uppercase opacity-60", children: "SBC Master V1.0.14" }),
+u$1("h2", { className: "text-xs font-black text-white tracking-widest uppercase opacity-60", children: "SBC Master V1.0.15" }),
 u$1(
                     "button",
                     {
