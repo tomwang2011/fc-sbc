@@ -1,5 +1,6 @@
 import { render } from 'preact';
 import { App } from './App';
+// @ts-ignore
 import './style.css';
 
 console.log('%c--- [FC-SBC] SCRIPT INJECTED & RUNNING ---', 'background: #000; color: #fff; font-size: 20px;');

@@ -429,19 +429,14 @@
   }
   class SbcBuilder {
     static _clubPlayersMemory = [];
-static getSbcContext() {
+    static getSbcContext() {
       const win = typeof unsafeWindow !== "undefined" ? unsafeWindow : window;
       try {
         const root = win.getAppMain().getRootViewController();
         const findController = (node) => {
           if (!node) return null;
-          if (node.className && (node.className.includes("SBCSquad") || node.className.includes("SplitView"))) return node;
-          const children = [
-            ...node.childViewControllers || [],
-            ...node.presentedViewController ? [node.presentedViewController] : [],
-            ...node.currentController ? [node.currentController] : [],
-            ...node._viewControllers || []
-          ];
+          if (node._squad && node._challenge) return node;
+          const children = [...node.childViewControllers || [], ...node.presentedViewController ? [node.presentedViewController] : [], ...node.currentController ? [node.currentController] : [], ...node._viewControllers || []];
           for (const child of children) {
             const found = findController(child);
             if (found) return found;
@@ -449,182 +444,313 @@ static getSbcContext() {
           return null;
         };
         const controller = findController(root);
-        if (controller) {
-          const squad = controller._squad || (controller._squadController ? controller._squadController._squad : null);
-          let challenge = controller._challenge || (controller._overviewController ? controller._overviewController._challenge : null) || (controller._parentViewController ? controller._parentViewController._challenge : null);
-          if (squad && challenge) return { challenge, squad, controller };
-        }
+        return controller ? { challenge: controller._challenge, squad: controller._squad, controller } : null;
       } catch (e2) {
+        return null;
       }
-      return null;
     }
-static async primeInventory() {
+    static getCleanValue(val) {
+      if (Array.isArray(val)) return val.map((v2) => v2?.value !== void 0 ? v2.value : v2);
+      return val?.value !== void 0 ? val.value : val;
+    }
+static fetchItems(criteriaParams) {
+      const win = typeof unsafeWindow !== "undefined" ? unsafeWindow : window;
+      return new Promise((r2) => {
+        const criteria = new win.UTSearchCriteriaDTO();
+        const finalParams = Object.assign({
+          type: "player",
+          count: 200,
+          excludeLoans: true,
+          isUntradeable: "true",
+          searchAltPositions: true,
+          sortBy: "ovr",
+          sort: "asc",
+          start: 0
+        }, criteriaParams);
+        Object.assign(criteria, finalParams);
+        console.log(`[FC-SBC] Searching Club: ${JSON.stringify(finalParams)}`);
+        win.services.Club.search(criteria).observe({ name: "fetch" }, (obs, res) => {
+          const raw = res.response?.items || res.items || res._collection || res;
+          const items = Array.isArray(raw) ? raw : raw?._collection || Object.values(raw || {});
+          r2(items);
+        });
+      });
+    }
+static async primeInventory(targetLevels = []) {
       const win = typeof unsafeWindow !== "undefined" ? unsafeWindow : window;
       const repo = win.repositories.Item;
       if (!repo) return { total: 0, storage: 0, unassigned: 0 };
-      console.log("[FC-SBC] Priming EA Repository...");
-      const criteria = new win.UTSearchCriteriaDTO();
-      criteria.type = "player";
-      criteria.level = "gold";
-      criteria.count = 250;
-      await new Promise((r2) => {
-        win.services.Club.search(criteria).observe(this, () => r2());
+      console.log("[FC-SBC] Starting Discovery Sync...");
+      const storageCriteria = new win.UTSearchCriteriaDTO();
+      storageCriteria.type = "player";
+      const storageItems = await new Promise((r2) => {
+        win.services.Item.searchStorageItems(storageCriteria).observe({ name: "storage" }, (obs, res) => {
+          const raw = res.response?.items || res.items || res._collection || res;
+          r2(Array.isArray(raw) ? raw : raw?._collection || Object.values(raw || {}));
+        });
       });
+      const clubFetches = [this.fetchItems({ count: 250 })];
+      targetLevels.forEach((lvl) => clubFetches.push(this.fetchItems({ level: lvl, count: 250 })));
+      const clubResults = await Promise.all(clubFetches);
       const allPlayers = new Map();
       let storageCount = 0;
       let unassignedCount = 0;
-      const addEntities = (source, isSafe = false, isStorage = false, isUnassigned = false) => {
-        if (!source) return;
-        const raw = source._collection || source.items || (Array.isArray(source) ? source : []);
-        const items = Array.isArray(raw) ? raw : Object.values(raw);
+      const addEntities = (items, source) => {
         items.forEach((p2) => {
-          if (p2 && p2.id && (p2.type === "player" || typeof p2.isPlayer === "function" && p2.isPlayer())) {
-            p2._isSafeSource = isSafe;
-            if (isStorage) storageCount++;
-            if (isUnassigned) unassignedCount++;
+          if (p2 && p2.id && !allPlayers.has(p2.id)) {
+            p2._sourceType = source;
+            p2._sourcePriority = source === "storage" ? 0 : source === "unassigned" ? 1 : 2;
+            p2._personaId = Number(p2.definitionId) % 16777216;
+            if (source === "storage") storageCount++;
+            if (source === "unassigned") unassignedCount++;
             allPlayers.set(p2.id, p2);
           }
         });
       };
-      addEntities(repo.unassigned, true, false, true);
-      addEntities(repo.getStorage()?.items, true, true, false);
-      addEntities(repo.getClub()?.items, false, false, false);
+      addEntities(storageItems, "storage");
+      const unassignedRaw = repo.unassigned?._collection || repo.unassigned || [];
+      addEntities(Array.isArray(unassignedRaw) ? unassignedRaw : Object.values(unassignedRaw), "unassigned");
+      clubResults.forEach((list) => addEntities(list, "club"));
       this._clubPlayersMemory = Array.from(allPlayers.values());
-      console.log(`[FC-SBC] Sync Ready: ${this._clubPlayersMemory.length} players.`);
+      console.log(`[FC-SBC] Sync Complete: ${this._clubPlayersMemory.length} players found (${storageCount} in Storage).`);
       return { total: this._clubPlayersMemory.length, storage: storageCount, unassigned: unassignedCount };
     }
-    static calculateSquadRating(players) {
-      const active = players.filter((p2) => p2 !== null);
-      if (active.length === 0) return 0;
-      const count = active.length;
+    static calculateRating(items) {
+      const active = items.filter((p2) => p2 !== null);
+      if (active.length < 11) return 0;
       const ratings = active.map((p2) => p2.rating);
       const sum = ratings.reduce((a2, b2) => a2 + b2, 0);
-      const avg = sum / count;
-      let excess = 0;
+      const avg = sum / 11;
+      let cf = 0;
       ratings.forEach((r2) => {
-        if (r2 > avg) excess += r2 - avg;
+        if (r2 > avg) cf += r2 - avg;
       });
-      const total = (sum + excess) / count;
-      return Math.floor(total + 0.04);
+      return Math.floor((sum + cf) / 11 + 0.0401);
     }
-static async solveSbc() {
-      const context = this.getSbcContext();
-      if (!context) return alert("SBC Squad screen not detected.");
-      const { challenge, squad, controller } = context;
-      const pitchSlots = squad.getSBCSlots().filter((s2) => !s2.isBrick());
-      try {
-        await this.primeInventory();
-        const pool = this._clubPlayersMemory.filter((p2) => {
-          const isLoan = typeof p2.isLoanItem === "function" && p2.isLoanItem() || p2.loan && p2.loan > 0;
-          const isEvo = typeof p2.isEvo === "function" && p2.isEvo() || !!p2.evolutionInfo || p2.rareflag === 116;
-          const isGold = p2.rating >= 75;
-          const isStandard = p2.subtype === 1;
-          if (p2._isSafeSource && isGold) return true;
-          return isGold && isStandard && !isLoan && !isEvo;
-        }).sort((a2, b2) => a2.rating - b2.rating);
-        console.log(`[FC-SBC] Solver Pool: ${pool.length} base golds.`);
-        const requirements = (challenge.eligibilityRequirements || []).map((req) => {
-          const col = req.kvPairs._collection || req.kvPairs;
-          const rules = [];
-          for (let key in col) {
-            const val = col[key];
-            const cleanValue = Array.isArray(val) ? val[0] : val && val.value !== void 0 ? val.value : val;
-            rules.push({ key: parseInt(key), value: cleanValue });
-          }
-          return { rules, count: req.count };
+    static normalizePos(id) {
+      if (!id && id !== 0) return null;
+      const rawId = typeof id === "object" ? id.id : id;
+      const map = { 2: 3, 8: 7, 4: 5, 6: 5, 9: 10, 11: 10, 13: 14, 15: 14, 17: 18, 19: 18, 20: 21, 22: 21, 24: 25, 26: 25 };
+      return map[rawId] || rawId;
+    }
+    static async saveSquad(challenge, squad, controller) {
+      const win = typeof unsafeWindow !== "undefined" ? unsafeWindow : window;
+      challenge.squad = squad;
+      console.log("[FC-SBC] Executing Server-Side Save...");
+      return new Promise((resolve) => {
+        win.services.SBC.saveChallenge(challenge).observe({ name: "Save" }, (obs, res) => {
+          squad.onDataUpdated.notify();
+          if (squad.isValid) squad.isValid();
+          if (controller._pushSquadToView) controller._pushSquadToView(squad);
+          console.log(`[FC-SBC] Server-Side Persist: ${res.success}`);
+          resolve(res.success);
         });
-        const targetSquadRating = requirements.find((r2) => r2.count === -1 && r2.rules.some((rule) => rule.key === 19))?.rules.find((rule) => rule.key === 19)?.value || 0;
-        const squadWideRules = requirements.filter((req) => req.count === -1).flatMap((req) => req.rules).filter((r2) => r2.key !== 19);
-        const usedDefIds = new Set();
-        const selected = new Array(pitchSlots.length).fill(null);
-        const matchesRule = (player, rule) => {
-          switch (rule.key) {
-            case 3:
-              return player.quality === rule.value;
-            case 11:
-              return player.leagueId === rule.value;
-            case 12:
-              return player.nationId === rule.value;
-            case 13:
-              return player.teamId === rule.value;
-            case 25:
-              return rule.value === 4 ? player.rareflag > 0 : player.rareflag === 0;
-            case 18:
-              return player.rarityId === 3 || player.rareflag === 3;
-            case 19:
-              return player.rating >= rule.value;
-            default:
-              return true;
-          }
-        };
-        requirements.forEach((req) => {
-          if (req.count <= 0) return;
-          let satisfied = 0;
-          for (let i2 = 0; i2 < pool.length && satisfied < req.count; i2++) {
-            const p2 = pool[i2];
-            if (!usedDefIds.has(p2.definitionId) && req.rules.every((r2) => matchesRule(p2, r2))) {
-              const emptyIdx = selected.findIndex((s2) => s2 === null);
-              if (emptyIdx !== -1) {
-                selected[emptyIdx] = p2;
-                usedDefIds.add(p2.definitionId);
-                satisfied++;
-              }
-            }
-          }
-        });
-        const smartStartRating = targetSquadRating >= 84 ? 83 : targetSquadRating >= 78 ? 75 : 45;
-        for (let i2 = 0; i2 < selected.length; i2++) {
-          if (selected[i2]) continue;
-          let trash = pool.find((p2) => !usedDefIds.has(p2.definitionId) && p2.rating >= smartStartRating && squadWideRules.every((r2) => matchesRule(p2, r2))) || pool.find((p2) => !usedDefIds.has(p2.definitionId) && squadWideRules.every((r2) => matchesRule(p2, r2)));
-          if (trash) {
-            selected[i2] = trash;
-            usedDefIds.add(trash.definitionId);
-          }
+      });
+    }
+static async solveEfficient(log, settings) {
+      const ctx = this.getSbcContext();
+      if (!ctx) return log("❌ SBC Screen Not Found");
+      const { challenge, squad, controller } = ctx;
+      log("Analyzing Requirements...");
+      const rawReqs = challenge.eligibilityRequirements || [];
+      let minRaresNeeded = 0;
+      const buckets = [];
+      let globalLevel = null;
+      const levelsToDiscover = new Set();
+      rawReqs.forEach((r2) => {
+        const label = (r2.requirementLabel || "").toLowerCase();
+        const col = r2.kvPairs._collection || r2.kvPairs;
+        const rules = [];
+        for (let k2 in col) rules.push({ key: parseInt(k2), value: this.getCleanValue(col[k2]) });
+        const isRare = rules.some((rl) => rl.key === 25 && rl.value.includes(4) || rl.key === 18 && rl.value.includes(1)) || label.includes("rare");
+        if (isRare) minRaresNeeded = Math.max(minRaresNeeded, r2.count || 0);
+        const bronze = rules.some((rl) => rl.key === 17 && rl.value.includes(1) || rl.key === 3 && rl.value.includes(1)) || label.includes("bronze");
+        const silver = rules.some((rl) => rl.key === 17 && rl.value.includes(2) || rl.key === 3 && rl.value.includes(2)) || label.includes("silver");
+        const gold = rules.some((rl) => rl.key === 17 && rl.value.includes(3) || rl.key === 3 && rl.value.includes(3)) || label.includes("gold");
+        const bInfo = bronze ? { level: "bronze", min: 0, max: 64 } : silver ? { level: "silver", min: 65, max: 74 } : gold ? { level: "gold", min: 75, max: 82 } : null;
+        if (bInfo) {
+          levelsToDiscover.add(bInfo.level);
+          if (r2.count > 0) buckets.push({ ...bInfo, count: r2.count });
+          else if (r2.count === -1) globalLevel = bInfo;
         }
-        if (targetSquadRating > 0 && selected.every((s2) => s2 !== null)) {
-          let currentRating = this.calculateSquadRating(selected);
-          let attempts = 0;
-          while (currentRating < targetSquadRating && attempts < 500) {
-            attempts++;
-            const minIdx = selected.reduce((m2, p2, idx, arr) => p2.rating < arr[m2].rating ? idx : m2, 0);
-            const old = selected[minIdx];
-            const upgrade = pool.find((p2) => !usedDefIds.has(p2.definitionId) && p2.rating > old.rating && squadWideRules.every((r2) => matchesRule(p2, r2)));
-            if (upgrade) {
-              usedDefIds.delete(old.definitionId);
-              selected[minIdx] = upgrade;
-              usedDefIds.add(upgrade.definitionId);
-              currentRating = this.calculateSquadRating(selected);
-            } else break;
+      });
+      if (buckets.length === 0 && !globalLevel) globalLevel = { level: "gold", min: 75, max: 82 };
+      log(`Discovered Tiers: ${Array.from(levelsToDiscover).join(", ")}`);
+      await this.primeInventory(Array.from(levelsToDiscover));
+      const usedPersonaIds = new Set();
+      const usedIds = new Set();
+      const activeSlots = squad.getSBCSlots().filter((s2) => !s2.isBrick() && s2.index <= 10);
+      const selected = new Array(activeSlots.length).fill(null);
+      let raresInserted = 0;
+      const pool = this._clubPlayersMemory.filter((p2) => {
+        if (settings.untradOnly && p2.tradable !== false) return false;
+        if (p2.limitedUseType === 2 || !!p2.evolutionInfo || p2.rareflag > 1) return false;
+        return true;
+      }).sort((a2, b2) => a2._sourcePriority - b2._sourcePriority || a2.rating - b2.rating);
+      const findMatch = (lvl, rareflag, ignoreRarity = false) => {
+        return pool.find((p2) => {
+          if (usedIds.has(p2.id) || usedPersonaIds.has(p2._personaId)) return false;
+          if (p2.rating < lvl.min || p2.rating > (lvl.level === "gold" ? 82 : lvl.max)) return false;
+          if (!ignoreRarity && p2.rareflag !== rareflag) return false;
+          return true;
+        });
+      };
+      const targetBuckets = [...buckets, ...globalLevel ? [{ ...globalLevel, count: 11 }] : []];
+      targetBuckets.forEach((bucket) => {
+        let count = 0;
+        const targetCount = bucket.count === 11 || bucket.count === -1 ? activeSlots.length : bucket.count;
+        activeSlots.forEach((slot, i2) => {
+          if (selected[i2] || count >= targetCount) return;
+          let match = raresInserted < minRaresNeeded ? findMatch(bucket, 1) : findMatch(bucket, 0, bucket.level !== "gold");
+          if (!match) match = findMatch(bucket, 0, true);
+          if (match) {
+            console.log(`[DECISION] Slot ${slot.index}: ${match.rareflag ? "RARE" : "COMMON"} ${match._staticData?.name} (${match.rating}) [Source: ${match._sourceType}]`);
+            selected[i2] = match;
+            usedIds.add(match.id);
+            usedPersonaIds.add(match._personaId);
+            count++;
+            if (match.rareflag) raresInserted++;
           }
-        }
-        const newPlayers = new Array(23).fill(null);
-        selected.forEach((p2, i2) => {
-          if (p2 && pitchSlots[i2]) newPlayers[pitchSlots[i2].index] = p2;
         });
-        squad.setPlayers(newPlayers);
-        squad.onDataUpdated.notify();
-        const win = typeof unsafeWindow !== "undefined" ? unsafeWindow : window;
-        win.services.SBC.saveChallenge(challenge).observe(this, (obs, res) => {
-          console.log(`[FC-SBC] Server Save: ${res.success ? "SUCCESS" : "FAILED"}`);
-        });
-        if (controller._overviewController?._pushSquadToView) {
-          controller._overviewController._pushSquadToView(squad);
-        } else if (controller._pushSquadToView) {
-          controller._pushSquadToView(squad);
-        }
-        alert(`Successfully populated squad! Final Rating: ${this.calculateSquadRating(selected)}`);
-      } catch (e2) {
-        alert("Solver failed: " + e2.message);
-        console.error(e2);
+      });
+      const finalArray = new Array(23).fill(null);
+      activeSlots.forEach((slot, i2) => {
+        if (selected[i2]) finalArray[slot.index] = selected[i2];
+      });
+      squad.setPlayers(finalArray);
+      await this.saveSquad(challenge, squad, controller);
+      log("✅ Solve Successful.");
+    }
+static async solveDeClogger(log, settings) {
+      const ctx = this.getSbcContext();
+      if (!ctx) return log("❌ SBC Screen Not Found");
+      const { challenge, squad, controller } = ctx;
+      log("Analyzing Anchor...");
+      let isTotwRequired = false;
+      (challenge.eligibilityRequirements || []).forEach((r2) => {
+        const rules = this.getCleanValue(r2.kvPairs._collection || r2.kvPairs);
+        if (rules.some && rules.some((rl) => rl.key === 18 && rl.value.includes(3))) isTotwRequired = true;
+      });
+      await this.primeInventory(isTotwRequired ? ["special"] : ["gold"]);
+      const pool = this._clubPlayersMemory.filter((p2) => {
+        if (settings.untradOnly && p2.tradable !== false) return false;
+        if (p2.rating >= 89 || !!p2.evolutionInfo || p2.rareflag === 116) return false;
+        return true;
+      }).sort((a2, b2) => a2._sourcePriority - b2._sourcePriority || a2.rating - b2.rating);
+      const usedPersonaIds = new Set();
+      const usedIds = new Set();
+      const activeSlots = squad.getSBCSlots().filter((s2) => !s2.isBrick() && s2.index <= 10);
+      const selected = new Array(activeSlots.length).fill(null);
+      let anchor = isTotwRequired ? pool.find((p2) => p2.rarityId === 3 || p2.rareflag === 3) : pool.find((p2) => p2.rating >= 87 && p2.rating <= 88 && p2.rareflag === 1);
+      if (anchor) {
+        console.log(`[DECISION] Anchor: ${anchor._staticData?.name} (${anchor.rating})`);
+        selected[0] = anchor;
+        usedIds.add(anchor.id);
+        usedPersonaIds.add(anchor._personaId);
       }
+      const clogs = { 83: 0, 84: 0 };
+      pool.forEach((p2) => {
+        if (p2._sourceType === "storage" && (p2.rating === 83 || p2.rating === 84)) clogs[p2.rating]++;
+      });
+      let pattern = anchor && anchor.rating >= 88 ? [{ r: 83, c: 10 }] : clogs[84] >= 6 ? [{ r: 84, c: 6 }, { r: 83, c: 4 }] : [{ r: 87, c: 1 }, { r: 83, c: 9 }];
+      pattern.forEach((pReq) => {
+        let count = 0;
+        pool.filter((p2) => p2.rating === pReq.r && p2.rareflag <= 1).forEach((p2) => {
+          const idx = selected.findIndex((s2) => s2 === null);
+          if (count < pReq.c && idx !== -1 && !usedIds.has(p2.id) && !usedPersonaIds.has(p2._personaId)) {
+            selected[idx] = p2;
+            usedIds.add(p2.id);
+            usedPersonaIds.add(p2._personaId);
+            count++;
+          }
+        });
+      });
+      activeSlots.forEach((slot, i2) => {
+        if (selected[i2]) return;
+        const filler = pool.find((p2) => !usedIds.has(p2.id) && !usedPersonaIds.has(p2._personaId) && p2.rareflag <= 1);
+        if (filler) {
+          selected[i2] = filler;
+          usedIds.add(filler.id);
+          usedPersonaIds.add(filler._personaId);
+        }
+      });
+      const finalArray = new Array(23).fill(null);
+      activeSlots.forEach((slot, i2) => {
+        if (selected[i2]) finalArray[slot.index] = selected[i2];
+      });
+      squad.setPlayers(finalArray);
+      await this.saveSquad(challenge, squad, controller);
+      log("✅ De-Clogger Complete.");
+    }
+static async solveLeague(log, settings) {
+      const ctx = this.getSbcContext();
+      if (!ctx) return log("❌ SBC Screen Not Found");
+      const { challenge, squad, controller } = ctx;
+      log("Syncing Required Leagues...");
+      const detectedLeagues = new Set();
+      (challenge.eligibilityRequirements || []).forEach((r2) => {
+        const col = r2.kvPairs._collection || r2.kvPairs;
+        for (let k2 in col) if (parseInt(k2) === 11) {
+          const val = this.getCleanValue(col[k2]);
+          (Array.isArray(val) ? val : [val]).forEach((l2) => detectedLeagues.add(l2));
+        }
+      });
+      const discoveryLeagues = Array.from(detectedLeagues).slice(0, 3);
+      const discoveryFetches = discoveryLeagues.map((l2) => this.fetchItems({ league: l2, count: 150 }));
+      await Promise.all(discoveryFetches);
+      await this.primeInventory();
+      const globalLeagues = Array.from(detectedLeagues);
+      const pool = this._clubPlayersMemory.filter((p2) => {
+        if (settings.untradOnly && p2.tradable !== false) return false;
+        if (p2.rating >= 83 || !!p2.evolutionInfo) return false;
+        if (globalLeagues.length > 0 && !globalLeagues.includes(p2.leagueId)) return false;
+        return true;
+      }).sort((a2, b2) => a2._sourcePriority - b2._sourcePriority || a2.rating - b2.rating);
+      const usedPersonaIds = new Set();
+      const usedIds = new Set();
+      const activeSlots = squad.getSBCSlots().filter((s2) => !s2.isBrick() && s2.index <= 10);
+      const selected = new Array(activeSlots.length).fill(null);
+      const fill = (source, matchPos) => {
+        activeSlots.forEach((slot, i2) => {
+          if (selected[i2]) return;
+          const slotPos = SbcBuilder.normalizePos(slot.position?.id || slot._position);
+          const match = pool.find((p2) => {
+            if (usedIds.has(p2.id) || usedPersonaIds.has(p2._personaId)) return false;
+            if (source && p2._sourceType !== source) return false;
+            if (matchPos && SbcBuilder.normalizePos(p2.preferredPosition) !== slotPos) return false;
+            return true;
+          });
+          if (match) {
+            console.log(`[DECISION] Slot ${slot.index}: ${match._staticData?.name} [Pos Match: ${matchPos}]`);
+            selected[i2] = match;
+            usedIds.add(match.id);
+            usedPersonaIds.add(match._personaId);
+          }
+        });
+      };
+      fill("storage", true);
+      fill("storage", false);
+      fill("club", true);
+      fill("club", false);
+      const finalArray = new Array(23).fill(null);
+      activeSlots.forEach((slot, i2) => {
+        if (selected[i2]) finalArray[slot.index] = selected[i2];
+      });
+      squad.setPlayers(finalArray);
+      await this.saveSquad(challenge, squad, controller);
+      log("✅ League Solve Complete.");
     }
   }
   function App() {
     const [showBuilder, setShowBuilder] = d(false);
     const [isScanning, setIsScanning] = d(false);
+    const [isSolving, setIsSolving] = d(false);
+    const [status, setStatus] = d("Ready for action.");
     const [stats, setStats] = d({ total: 0, sbcStorage: 0, unassigned: 0 });
+    const [untradOnly, setUntradOnly] = d(true);
     const handleScan = async () => {
       setIsScanning(true);
+      setStatus("Syncing Inventory...");
       try {
         await new Promise((r2) => setTimeout(r2, 100));
         const res = await SbcBuilder.primeInventory();
@@ -633,13 +759,37 @@ static async solveSbc() {
           sbcStorage: res.storage,
           unassigned: res.unassigned
         });
+        setStatus("Inventory Sync Complete.");
       } catch (e2) {
         console.error("[FC-SBC] Scan error:", e2.message);
+        setStatus("❌ Sync Failed.");
       } finally {
         setIsScanning(false);
       }
     };
-    return u$1("div", { className: "fixed top-4 left-4 z-[9999999] pointer-events-auto font-sans text-zinc-900", children: [
+    const runSolver = async (type) => {
+      setIsSolving(true);
+      setStatus(`Running ${type.toUpperCase()} Solver...`);
+      try {
+        const solverMap = {
+          league: SbcBuilder.solveLeague.bind(SbcBuilder),
+          declog: SbcBuilder.solveDeClogger.bind(SbcBuilder),
+          efficient: SbcBuilder.solveEfficient.bind(SbcBuilder)
+        };
+        await solverMap[type](
+          (msg) => setStatus(msg),
+          { untradOnly }
+        );
+        const res = await SbcBuilder.primeInventory();
+        setStats({ total: res.total, sbcStorage: res.storage, unassigned: res.unassigned });
+      } catch (e2) {
+        console.error("[FC-SBC] Solve error:", e2);
+        setStatus(`❌ Error: ${e2.message}`);
+      } finally {
+        setIsSolving(false);
+      }
+    };
+    return u$1("div", { className: "fixed top-4 left-4 z-[9999999] pointer-events-auto font-sans", children: [
 u$1(
         "button",
         {
@@ -649,58 +799,90 @@ u$1(
           },
           className: "bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg shadow-xl transition-all hover:scale-105 flex items-center gap-2 border border-white/20",
           children: [
-u$1("span", { className: "text-xl", children: "🚀" }),
-u$1("span", { children: showBuilder ? "CLOSE" : "SBC BUILDER" })
+u$1("span", { className: "text-xl", children: "⚡" }),
+u$1("span", { children: showBuilder ? "CLOSE" : "SBC SOLVER" })
           ]
         }
       ),
-      showBuilder && u$1("div", { className: "absolute top-14 left-0 w-80 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-2xl p-4 overflow-hidden animate-in fade-in slide-in-from-top-4", children: [
+      showBuilder && u$1("div", { className: "absolute top-14 left-0 w-80 bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl p-4 overflow-hidden animate-in fade-in slide-in-from-top-4", children: [
 u$1("div", { className: "flex justify-between items-center mb-4", children: [
-u$1("h2", { className: "text-lg font-bold text-zinc-900 dark:text-white", children: "SBC Optimizer" }),
+u$1("h2", { className: "text-lg font-bold text-white", children: "SBC Master Tool" }),
 u$1(
             "button",
             {
               onClick: handleScan,
-              className: `text-xs ${isScanning ? "animate-spin" : ""} bg-zinc-100 dark:bg-zinc-800 p-1.5 rounded-md hover:bg-zinc-200 dark:hover:bg-zinc-700`,
+              disabled: isScanning,
+              className: `text-xs ${isScanning ? "animate-spin opacity-50" : ""} bg-zinc-800 p-1.5 rounded-md hover:bg-zinc-700 text-zinc-400`,
               children: "🔄"
             }
           )
         ] }),
-u$1("div", { className: "space-y-3", children: [
+u$1("div", { className: "space-y-4", children: [
 u$1("div", { className: "grid grid-cols-3 gap-2", children: [
-u$1("div", { className: "p-2 bg-zinc-50 dark:bg-zinc-800 rounded-lg text-center", children: [
-u$1("div", { className: "text-[10px] text-zinc-400 uppercase", children: "Club" }),
-u$1("div", { className: "font-bold text-zinc-900 dark:text-white", children: stats.total })
+u$1("div", { className: "p-2 bg-zinc-800/50 rounded-lg text-center border border-zinc-800", children: [
+u$1("div", { className: "text-[10px] text-zinc-500 uppercase", children: "Club" }),
+u$1("div", { className: "font-bold text-white", children: stats.total })
             ] }),
-u$1("div", { className: "p-2 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-center border border-blue-100 dark:border-blue-900/30", children: [
+u$1("div", { className: "p-2 bg-blue-900/10 rounded-lg text-center border border-blue-900/30", children: [
 u$1("div", { className: "text-[10px] text-blue-500 uppercase", children: "Storage" }),
-u$1("div", { className: "font-bold text-blue-600 dark:text-blue-400", children: stats.sbcStorage })
+u$1("div", { className: "font-bold text-blue-400", children: stats.sbcStorage })
             ] }),
-u$1("div", { className: "p-2 bg-orange-50 dark:bg-orange-900/20 rounded-lg text-center border border-orange-100 dark:border-orange-900/30", children: [
+u$1("div", { className: "p-2 bg-orange-900/10 rounded-lg text-center border border-orange-900/30", children: [
 u$1("div", { className: "text-[10px] text-orange-500 uppercase", children: "Unassgn" }),
-u$1("div", { className: "font-bold text-orange-600 dark:text-orange-400", children: stats.unassigned })
+u$1("div", { className: "font-bold text-orange-400", children: stats.unassigned })
             ] })
           ] }),
-u$1("div", { className: "border-t border-zinc-100 dark:border-zinc-800 pt-3", children: [
-u$1("div", { className: "flex justify-between text-xs mb-2", children: [
-u$1("span", { className: "text-zinc-500", children: "Target Rating:" }),
-u$1("span", { className: "font-mono bg-zinc-100 dark:bg-zinc-800 px-2 rounded", children: "84.x" })
+u$1("div", { className: "bg-zinc-800/30 p-2 rounded-lg border border-zinc-800/50", children: u$1("label", { className: "flex items-center gap-3 cursor-pointer group", children: [
+u$1("div", { className: "relative", children: [
+u$1(
+                "input",
+                {
+                  type: "checkbox",
+                  className: "sr-only",
+                  checked: untradOnly,
+                  onChange: (e2) => setUntradOnly(e2.currentTarget.checked)
+                }
+              ),
+u$1("div", { className: `w-10 h-5 rounded-full transition-colors ${untradOnly ? "bg-indigo-600" : "bg-zinc-700"}` }),
+u$1("div", { className: `absolute left-1 top-1 w-3 h-3 bg-white rounded-full transition-transform ${untradOnly ? "translate-x-5" : ""}` })
             ] }),
+u$1("span", { className: "text-xs font-medium text-zinc-300 group-hover:text-white transition-colors", children: "Untradeable Only" })
+          ] }) }),
+u$1("div", { className: "space-y-2 pt-2 border-t border-zinc-800", children: [
 u$1(
               "button",
               {
-                className: "w-full bg-indigo-500 hover:bg-indigo-600 text-white py-2.5 rounded-lg font-bold shadow-lg shadow-indigo-500/20 transition-all active:scale-95 mb-2",
-                onClick: () => SbcBuilder.solveSbc(),
-                children: "🚀 GENERATE SQUAD"
+                disabled: isSolving,
+                onClick: () => runSolver("league"),
+                className: "w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white py-2.5 rounded-lg text-xs font-bold shadow-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2",
+                children: "⚽ LEAGUE SOLVER"
+              }
+            ),
+u$1(
+              "button",
+              {
+                disabled: isSolving,
+                onClick: () => runSolver("declog"),
+                className: "w-full bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white py-2.5 rounded-lg text-xs font-bold shadow-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2",
+                children: "📦 DE-CLOGGER (83x14)"
+              }
+            ),
+u$1(
+              "button",
+              {
+                disabled: isSolving,
+                onClick: () => runSolver("efficient"),
+                className: "w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white py-2.5 rounded-lg text-xs font-bold shadow-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2",
+                children: "💎 RARE/COMMON EFFICIENT"
               }
             )
           ] }),
-u$1("p", { className: "text-[10px] text-zinc-400 text-center italic", children: "Prioritizing SBC Storage and Duplicates..." })
+u$1("div", { className: "mt-2 bg-black/40 rounded p-2.5 min-h-[40px] flex items-center justify-center border border-zinc-800/50", children: u$1("p", { className: "text-[10px] text-zinc-400 text-center leading-tight", children: status }) })
         ] })
       ] })
     ] });
   }
-  const styleCss = '*,:before,:after{--tw-border-spacing-x: 0;--tw-border-spacing-y: 0;--tw-translate-x: 0;--tw-translate-y: 0;--tw-rotate: 0;--tw-skew-x: 0;--tw-skew-y: 0;--tw-scale-x: 1;--tw-scale-y: 1;--tw-pan-x: ;--tw-pan-y: ;--tw-pinch-zoom: ;--tw-scroll-snap-strictness: proximity;--tw-gradient-from-position: ;--tw-gradient-via-position: ;--tw-gradient-to-position: ;--tw-ordinal: ;--tw-slashed-zero: ;--tw-numeric-figure: ;--tw-numeric-spacing: ;--tw-numeric-fraction: ;--tw-ring-inset: ;--tw-ring-offset-width: 0px;--tw-ring-offset-color: #fff;--tw-ring-color: rgb(59 130 246 / .5);--tw-ring-offset-shadow: 0 0 #0000;--tw-ring-shadow: 0 0 #0000;--tw-shadow: 0 0 #0000;--tw-shadow-colored: 0 0 #0000;--tw-blur: ;--tw-brightness: ;--tw-contrast: ;--tw-grayscale: ;--tw-hue-rotate: ;--tw-invert: ;--tw-saturate: ;--tw-sepia: ;--tw-drop-shadow: ;--tw-backdrop-blur: ;--tw-backdrop-brightness: ;--tw-backdrop-contrast: ;--tw-backdrop-grayscale: ;--tw-backdrop-hue-rotate: ;--tw-backdrop-invert: ;--tw-backdrop-opacity: ;--tw-backdrop-saturate: ;--tw-backdrop-sepia: ;--tw-contain-size: ;--tw-contain-layout: ;--tw-contain-paint: ;--tw-contain-style: }::backdrop{--tw-border-spacing-x: 0;--tw-border-spacing-y: 0;--tw-translate-x: 0;--tw-translate-y: 0;--tw-rotate: 0;--tw-skew-x: 0;--tw-skew-y: 0;--tw-scale-x: 1;--tw-scale-y: 1;--tw-pan-x: ;--tw-pan-y: ;--tw-pinch-zoom: ;--tw-scroll-snap-strictness: proximity;--tw-gradient-from-position: ;--tw-gradient-via-position: ;--tw-gradient-to-position: ;--tw-ordinal: ;--tw-slashed-zero: ;--tw-numeric-figure: ;--tw-numeric-spacing: ;--tw-numeric-fraction: ;--tw-ring-inset: ;--tw-ring-offset-width: 0px;--tw-ring-offset-color: #fff;--tw-ring-color: rgb(59 130 246 / .5);--tw-ring-offset-shadow: 0 0 #0000;--tw-ring-shadow: 0 0 #0000;--tw-shadow: 0 0 #0000;--tw-shadow-colored: 0 0 #0000;--tw-blur: ;--tw-brightness: ;--tw-contrast: ;--tw-grayscale: ;--tw-hue-rotate: ;--tw-invert: ;--tw-saturate: ;--tw-sepia: ;--tw-drop-shadow: ;--tw-backdrop-blur: ;--tw-backdrop-brightness: ;--tw-backdrop-contrast: ;--tw-backdrop-grayscale: ;--tw-backdrop-hue-rotate: ;--tw-backdrop-invert: ;--tw-backdrop-opacity: ;--tw-backdrop-saturate: ;--tw-backdrop-sepia: ;--tw-contain-size: ;--tw-contain-layout: ;--tw-contain-paint: ;--tw-contain-style: }*,:before,:after{box-sizing:border-box;border-width:0;border-style:solid;border-color:#e5e7eb}:before,:after{--tw-content: ""}html,:host{line-height:1.5;-webkit-text-size-adjust:100%;-moz-tab-size:4;-o-tab-size:4;tab-size:4;font-family:ui-sans-serif,system-ui,sans-serif,"Apple Color Emoji","Segoe UI Emoji",Segoe UI Symbol,"Noto Color Emoji";font-feature-settings:normal;font-variation-settings:normal;-webkit-tap-highlight-color:transparent}body{margin:0;line-height:inherit}hr{height:0;color:inherit;border-top-width:1px}abbr:where([title]){-webkit-text-decoration:underline dotted;text-decoration:underline dotted}h1,h2,h3,h4,h5,h6{font-size:inherit;font-weight:inherit}a{color:inherit;text-decoration:inherit}b,strong{font-weight:bolder}code,kbd,samp,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,Liberation Mono,Courier New,monospace;font-feature-settings:normal;font-variation-settings:normal;font-size:1em}small{font-size:80%}sub,sup{font-size:75%;line-height:0;position:relative;vertical-align:baseline}sub{bottom:-.25em}sup{top:-.5em}table{text-indent:0;border-color:inherit;border-collapse:collapse}button,input,optgroup,select,textarea{font-family:inherit;font-feature-settings:inherit;font-variation-settings:inherit;font-size:100%;font-weight:inherit;line-height:inherit;letter-spacing:inherit;color:inherit;margin:0;padding:0}button,select{text-transform:none}button,input:where([type=button]),input:where([type=reset]),input:where([type=submit]){-webkit-appearance:button;background-color:transparent;background-image:none}:-moz-focusring{outline:auto}:-moz-ui-invalid{box-shadow:none}progress{vertical-align:baseline}::-webkit-inner-spin-button,::-webkit-outer-spin-button{height:auto}[type=search]{-webkit-appearance:textfield;outline-offset:-2px}::-webkit-search-decoration{-webkit-appearance:none}::-webkit-file-upload-button{-webkit-appearance:button;font:inherit}summary{display:list-item}blockquote,dl,dd,h1,h2,h3,h4,h5,h6,hr,figure,p,pre{margin:0}fieldset{margin:0;padding:0}legend{padding:0}ol,ul,menu{list-style:none;margin:0;padding:0}dialog{padding:0}textarea{resize:vertical}input::-moz-placeholder,textarea::-moz-placeholder{opacity:1;color:#9ca3af}input::placeholder,textarea::placeholder{opacity:1;color:#9ca3af}button,[role=button]{cursor:pointer}:disabled{cursor:default}img,svg,video,canvas,audio,iframe,embed,object{display:block;vertical-align:middle}img,video{max-width:100%;height:auto}[hidden]:where(:not([hidden=until-found])){display:none}.container{width:100%}@media(min-width:640px){.container{max-width:640px}}@media(min-width:768px){.container{max-width:768px}}@media(min-width:1024px){.container{max-width:1024px}}@media(min-width:1280px){.container{max-width:1280px}}@media(min-width:1536px){.container{max-width:1536px}}.pointer-events-auto{pointer-events:auto}.static{position:static}.fixed{position:fixed}.absolute{position:absolute}.left-0{left:0}.left-4{left:1rem}.top-14{top:3.5rem}.top-4{top:1rem}.z-\\[9999999\\]{z-index:9999999}.mb-2{margin-bottom:.5rem}.mb-4{margin-bottom:1rem}.inline{display:inline}.flex{display:flex}.grid{display:grid}.w-80{width:20rem}.w-full{width:100%}@keyframes spin{to{transform:rotate(360deg)}}.animate-spin{animation:spin 1s linear infinite}.grid-cols-3{grid-template-columns:repeat(3,minmax(0,1fr))}.items-center{align-items:center}.justify-between{justify-content:space-between}.gap-2{gap:.5rem}.space-y-3>:not([hidden])~:not([hidden]){--tw-space-y-reverse: 0;margin-top:calc(.75rem * calc(1 - var(--tw-space-y-reverse)));margin-bottom:calc(.75rem * var(--tw-space-y-reverse))}.overflow-hidden{overflow:hidden}.rounded{border-radius:.25rem}.rounded-lg{border-radius:.5rem}.rounded-md{border-radius:.375rem}.rounded-xl{border-radius:.75rem}.border{border-width:1px}.border-t{border-top-width:1px}.border-blue-100{--tw-border-opacity: 1;border-color:rgb(219 234 254 / var(--tw-border-opacity, 1))}.border-orange-100{--tw-border-opacity: 1;border-color:rgb(255 237 213 / var(--tw-border-opacity, 1))}.border-white\\/20{border-color:#fff3}.border-zinc-100{--tw-border-opacity: 1;border-color:rgb(244 244 245 / var(--tw-border-opacity, 1))}.border-zinc-200{--tw-border-opacity: 1;border-color:rgb(228 228 231 / var(--tw-border-opacity, 1))}.bg-blue-50{--tw-bg-opacity: 1;background-color:rgb(239 246 255 / var(--tw-bg-opacity, 1))}.bg-indigo-500{--tw-bg-opacity: 1;background-color:rgb(99 102 241 / var(--tw-bg-opacity, 1))}.bg-indigo-600{--tw-bg-opacity: 1;background-color:rgb(79 70 229 / var(--tw-bg-opacity, 1))}.bg-orange-50{--tw-bg-opacity: 1;background-color:rgb(255 247 237 / var(--tw-bg-opacity, 1))}.bg-white{--tw-bg-opacity: 1;background-color:rgb(255 255 255 / var(--tw-bg-opacity, 1))}.bg-zinc-100{--tw-bg-opacity: 1;background-color:rgb(244 244 245 / var(--tw-bg-opacity, 1))}.bg-zinc-50{--tw-bg-opacity: 1;background-color:rgb(250 250 250 / var(--tw-bg-opacity, 1))}.p-1\\.5{padding:.375rem}.p-2{padding:.5rem}.p-4{padding:1rem}.px-2{padding-left:.5rem;padding-right:.5rem}.px-4{padding-left:1rem;padding-right:1rem}.py-2{padding-top:.5rem;padding-bottom:.5rem}.py-2\\.5{padding-top:.625rem;padding-bottom:.625rem}.pt-3{padding-top:.75rem}.text-center{text-align:center}.font-mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,Liberation Mono,Courier New,monospace}.font-sans{font-family:ui-sans-serif,system-ui,sans-serif,"Apple Color Emoji","Segoe UI Emoji",Segoe UI Symbol,"Noto Color Emoji"}.text-\\[10px\\]{font-size:10px}.text-lg{font-size:1.125rem;line-height:1.75rem}.text-xl{font-size:1.25rem;line-height:1.75rem}.text-xs{font-size:.75rem;line-height:1rem}.font-bold{font-weight:700}.uppercase{text-transform:uppercase}.italic{font-style:italic}.text-blue-500{--tw-text-opacity: 1;color:rgb(59 130 246 / var(--tw-text-opacity, 1))}.text-blue-600{--tw-text-opacity: 1;color:rgb(37 99 235 / var(--tw-text-opacity, 1))}.text-orange-500{--tw-text-opacity: 1;color:rgb(249 115 22 / var(--tw-text-opacity, 1))}.text-orange-600{--tw-text-opacity: 1;color:rgb(234 88 12 / var(--tw-text-opacity, 1))}.text-white{--tw-text-opacity: 1;color:rgb(255 255 255 / var(--tw-text-opacity, 1))}.text-zinc-400{--tw-text-opacity: 1;color:rgb(161 161 170 / var(--tw-text-opacity, 1))}.text-zinc-500{--tw-text-opacity: 1;color:rgb(113 113 122 / var(--tw-text-opacity, 1))}.text-zinc-900{--tw-text-opacity: 1;color:rgb(24 24 27 / var(--tw-text-opacity, 1))}.shadow-2xl{--tw-shadow: 0 25px 50px -12px rgb(0 0 0 / .25);--tw-shadow-colored: 0 25px 50px -12px var(--tw-shadow-color);box-shadow:var(--tw-ring-offset-shadow, 0 0 #0000),var(--tw-ring-shadow, 0 0 #0000),var(--tw-shadow)}.shadow-lg{--tw-shadow: 0 10px 15px -3px rgb(0 0 0 / .1), 0 4px 6px -4px rgb(0 0 0 / .1);--tw-shadow-colored: 0 10px 15px -3px var(--tw-shadow-color), 0 4px 6px -4px var(--tw-shadow-color);box-shadow:var(--tw-ring-offset-shadow, 0 0 #0000),var(--tw-ring-shadow, 0 0 #0000),var(--tw-shadow)}.shadow-xl{--tw-shadow: 0 20px 25px -5px rgb(0 0 0 / .1), 0 8px 10px -6px rgb(0 0 0 / .1);--tw-shadow-colored: 0 20px 25px -5px var(--tw-shadow-color), 0 8px 10px -6px var(--tw-shadow-color);box-shadow:var(--tw-ring-offset-shadow, 0 0 #0000),var(--tw-ring-shadow, 0 0 #0000),var(--tw-shadow)}.shadow-indigo-500\\/20{--tw-shadow-color: rgb(99 102 241 / .2);--tw-shadow: var(--tw-shadow-colored)}.filter{filter:var(--tw-blur) var(--tw-brightness) var(--tw-contrast) var(--tw-grayscale) var(--tw-hue-rotate) var(--tw-invert) var(--tw-saturate) var(--tw-sepia) var(--tw-drop-shadow)}.transition-all{transition-property:all;transition-timing-function:cubic-bezier(.4,0,.2,1);transition-duration:.15s}.hover\\:scale-105:hover{--tw-scale-x: 1.05;--tw-scale-y: 1.05;transform:translate(var(--tw-translate-x),var(--tw-translate-y)) rotate(var(--tw-rotate)) skew(var(--tw-skew-x)) skewY(var(--tw-skew-y)) scaleX(var(--tw-scale-x)) scaleY(var(--tw-scale-y))}.hover\\:bg-indigo-600:hover{--tw-bg-opacity: 1;background-color:rgb(79 70 229 / var(--tw-bg-opacity, 1))}.hover\\:bg-indigo-700:hover{--tw-bg-opacity: 1;background-color:rgb(67 56 202 / var(--tw-bg-opacity, 1))}.hover\\:bg-zinc-200:hover{--tw-bg-opacity: 1;background-color:rgb(228 228 231 / var(--tw-bg-opacity, 1))}.active\\:scale-95:active{--tw-scale-x: .95;--tw-scale-y: .95;transform:translate(var(--tw-translate-x),var(--tw-translate-y)) rotate(var(--tw-rotate)) skew(var(--tw-skew-x)) skewY(var(--tw-skew-y)) scaleX(var(--tw-scale-x)) scaleY(var(--tw-scale-y))}@media(prefers-color-scheme:dark){.dark\\:border-blue-900\\/30{border-color:#1e3a8a4d}.dark\\:border-orange-900\\/30{border-color:#7c2d124d}.dark\\:border-zinc-800{--tw-border-opacity: 1;border-color:rgb(39 39 42 / var(--tw-border-opacity, 1))}.dark\\:bg-blue-900\\/20{background-color:#1e3a8a33}.dark\\:bg-orange-900\\/20{background-color:#7c2d1233}.dark\\:bg-zinc-800{--tw-bg-opacity: 1;background-color:rgb(39 39 42 / var(--tw-bg-opacity, 1))}.dark\\:bg-zinc-900{--tw-bg-opacity: 1;background-color:rgb(24 24 27 / var(--tw-bg-opacity, 1))}.dark\\:text-blue-400{--tw-text-opacity: 1;color:rgb(96 165 250 / var(--tw-text-opacity, 1))}.dark\\:text-orange-400{--tw-text-opacity: 1;color:rgb(251 146 60 / var(--tw-text-opacity, 1))}.dark\\:text-white{--tw-text-opacity: 1;color:rgb(255 255 255 / var(--tw-text-opacity, 1))}.dark\\:hover\\:bg-zinc-700:hover{--tw-bg-opacity: 1;background-color:rgb(63 63 70 / var(--tw-bg-opacity, 1))}}';
+  const styleCss = "@tailwind base;@tailwind components;@tailwind utilities;";
   const style = Object.freeze( Object.defineProperty({
     __proto__: null,
     default: styleCss
