@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC SBC Enhanced Builder
 // @namespace    fc-sbc-builder
-// @version      1.0.0
+// @version      1.0.6
 // @author       tomwang
 // @description  Optimal SBC builder with Storage-First priority
 // @license      ISC
