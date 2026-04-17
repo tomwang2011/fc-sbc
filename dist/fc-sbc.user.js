@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC SBC Enhanced Builder
 // @namespace    fc-sbc-builder
-// @version      1.0.12
+// @version      1.0.13
 // @author       tomwang
 // @description  Optimal SBC builder with Storage-First priority
 // @license      ISC
@@ -461,7 +461,7 @@
         const criteria = new win.UTSearchCriteriaDTO();
         const finalParams = Object.assign({
           type: "player",
-          count: 250,
+          count: 200,
           excludeLoans: true,
           isUntradeable: "true",
           searchAltPositions: true,
@@ -542,7 +542,22 @@
     static normalizePos(id) {
       if (!id && id !== 0) return null;
       const rawId = typeof id === "object" ? id.id : id;
-      const map = { 2: 3, 8: 7, 4: 5, 6: 5, 9: 10, 11: 10, 13: 14, 15: 14, 17: 18, 19: 18, 20: 21, 22: 21, 24: 25, 26: 25 };
+      const map = {
+        2: 3,
+        8: 7,
+        4: 5,
+        6: 5,
+        9: 10,
+        11: 10,
+        13: 14,
+        15: 14,
+        17: 18,
+        19: 18,
+        20: 21,
+        22: 21,
+        24: 25,
+        26: 25
+      };
       return map[rawId] || rawId;
     }
 static async solveEfficient(log, settings) {
@@ -556,8 +571,8 @@ static async solveEfficient(log, settings) {
       let globalLevel = null;
       const levelsToDiscover = new Set();
       rawReqs.forEach((r2) => {
-        const rules = [];
         const col = r2.kvPairs._collection || r2.kvPairs;
+        const rules = [];
         for (let k2 in col) rules.push({ key: parseInt(k2), value: this.getCleanValue(col[k2]) });
         const isRare = rules.some((rl) => rl.key === 25 && rl.value.includes(4) || rl.key === 18 && rl.value.includes(1));
         if (isRare) minRaresNeeded = Math.max(minRaresNeeded, r2.count || 0);
@@ -595,8 +610,9 @@ static async solveEfficient(log, settings) {
       };
       [...buckets, ...globalLevel ? [{ ...globalLevel, count: 11 }] : []].forEach((bucket) => {
         let count = 0;
+        const targetCount = bucket.count === 11 || bucket.count === -1 ? activeSlots.length : bucket.count;
         activeSlots.forEach((slot, i2) => {
-          if (selected[i2] || count >= (bucket.count === 11 || bucket.count === -1 ? activeSlots.length : bucket.count)) return;
+          if (selected[i2] || count >= targetCount) return;
           let match = raresInserted < minRaresNeeded ? findMatch(bucket, 1) : findMatch(bucket, 0, bucket.level !== "gold");
           if (!match) match = findMatch(bucket, 0, true);
           if (match) {
@@ -696,14 +712,12 @@ static async solveLeague(log, settings) {
         for (let k2 in col) {
           const val = this.getCleanValue(col[k2]);
           const key = parseInt(k2);
-          if (key === 19) {
-            const cleanVal = Array.isArray(val) ? val[0] : val;
-            targetRating = Math.max(targetRating, Number(cleanVal) || 0);
-          }
+          if (key === 19) targetRating = Math.max(targetRating, Number(Array.isArray(val) ? val[0] : val) || 0);
           if (key === 11) (Array.isArray(val) ? val : [val]).forEach((l2) => detectedLeagues.add(l2));
           if (key === 18 && val.includes(3)) isTotwReq = true;
         }
       });
+      log(`Goal: ${targetRating} OVR | Required Leagues: ${Array.from(detectedLeagues).join(",")}`);
       const discoveryLeagues = Array.from(detectedLeagues).slice(0, 3);
       await Promise.all(discoveryLeagues.map((l2) => this.fetchItems({ league: l2, count: 150 })));
       await this.primeInventory();
@@ -744,7 +758,7 @@ static async solveLeague(log, settings) {
       fillPass("storage", false);
       fillPass("club", false);
       if (targetRating > 0) {
-        log(`Balancing Rating to hit ${targetRating}...`);
+        log(`Balancing Rating to ${targetRating}...`);
         let bridgeAttempts = 0;
         while (bridgeAttempts < 50 && this.calculateRating(selected) < targetRating) {
           bridgeAttempts++;
@@ -752,8 +766,13 @@ static async solveLeague(log, settings) {
           const upIdx = selected.findIndex((s2) => s2 && s2.rating === minR);
           if (upIdx === -1) break;
           const currentItem = selected[upIdx];
-          const upgrade = pool.find((p2) => !usedIds.has(p2.id) && !usedPersonaIds.has(p2._personaId) && p2.rating > currentItem.rating && p2.leagueId === currentItem.leagueId);
+          const slot = activeSlots[upIdx];
+          const slotPos = SbcBuilder.normalizePos(slot.position?.id || slot._position);
+          const wasPosMatch = SbcBuilder.normalizePos(currentItem.preferredPosition) === slotPos;
+          let upgrade = pool.find((p2) => !usedIds.has(p2.id) && !usedPersonaIds.has(p2._personaId) && p2.rating > currentItem.rating && p2.leagueId === currentItem.leagueId && (wasPosMatch ? SbcBuilder.normalizePos(p2.preferredPosition) === slotPos : true));
+          if (!upgrade) upgrade = pool.find((p2) => !usedIds.has(p2.id) && !usedPersonaIds.has(p2._personaId) && p2.rating > currentItem.rating && p2.leagueId === currentItem.leagueId);
           if (upgrade) {
+            console.log(`[BRIDGE] Upgrading Slot ${slot.index}: ${currentItem.rating} -> ${upgrade.rating} (${upgrade._staticData?.name})`);
             usedIds.delete(currentItem.id);
             usedPersonaIds.delete(currentItem._personaId);
             selected[upIdx] = upgrade;
@@ -883,7 +902,7 @@ u$1(
               className: "animate-in slide-in-from-left-4 fade-in duration-300",
               children: [
 u$1("div", { className: "flex justify-between items-center mb-6", children: [
-u$1("h2", { className: "text-xs font-black text-white tracking-widest uppercase opacity-60", children: "SBC Master V1.0.12" }),
+u$1("h2", { className: "text-xs font-black text-white tracking-widest uppercase opacity-60", children: "SBC Master V1.0.13" }),
 u$1(
                     "button",
                     {

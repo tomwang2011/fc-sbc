@@ -67,7 +67,7 @@ export class SbcBuilder {
     return new Promise(r => {
       const criteria = new win.UTSearchCriteriaDTO();
       const finalParams = Object.assign({
-        type: 'player', count: 250, excludeLoans: true, isUntradeable: "true", searchAltPositions: true, sortBy: "ovr", sort: "asc"
+        type: 'player', count: 200, excludeLoans: true, isUntradeable: "true", searchAltPositions: true, sortBy: "ovr", sort: "asc"
       }, criteriaParams);
       Object.assign(criteria, finalParams);
       win.services.Club.search(criteria).observe({ name: 'fetch' }, (obs: any, res: any) => {
@@ -101,10 +101,8 @@ export class SbcBuilder {
     const addEntities = (items: any[], source: string) => {
       items.forEach((p: any) => {
         if (p && p.id && !allPlayers.has(p.id)) {
-          // BASE PROTECTION: No Evos, No Loans, No In-Progress
           const isEvo = !!p.evolutionInfo || p.rareflag === 116 || p.upgrades !== null;
           if (p.limitedUseType === 2 || isEvo) return;
-
           p._sourceType = source;
           p._sourcePriority = (source === 'storage' ? 0 : (source === 'unassigned' ? 1 : 2));
           p._personaId = Number(p.definitionId) % 16777216;
@@ -151,7 +149,14 @@ export class SbcBuilder {
   public static normalizePos(id: any): number | null {
     if (!id && id !== 0) return null;
     const rawId = typeof id === 'object' ? id.id : id;
-    const map: Record<number, number> = { 2: 3, 8: 7, 4: 5, 6: 5, 9: 10, 11: 10, 13: 14, 15: 14, 17: 18, 19: 18, 20: 21, 22: 21, 24: 25, 26: 25 };
+    // Expanded Mapping: 
+    // 2/3: LWB/LB, 7/8: RB/RWB, 4/5/6: CB/SW, 9/10/11: CDM, 13/14/15: CM, 17/18/19: CAM, 20/21/22: RW/RF/RM, 24/25/26: LW/LF/LM
+    const map: Record<number, number> = { 
+        2: 3, 8: 7, 4: 5, 6: 5, 
+        9: 10, 11: 10, 13: 14, 15: 14, 
+        17: 18, 19: 18, 20: 21, 22: 21, 
+        24: 25, 26: 25 
+    };
     return map[rawId] || rawId;
   }
 
@@ -169,8 +174,8 @@ export class SbcBuilder {
     const levelsToDiscover = new Set<string>();
 
     rawReqs.forEach((r: any) => {
-        const rules: any[] = [];
         const col = r.kvPairs._collection || r.kvPairs;
+        const rules: any[] = [];
         for (let k in col) rules.push({ key: parseInt(k), value: this.getCleanValue(col[k]) });
         const isRare = rules.some(rl => (rl.key === 25 && rl.value.includes(4)) || (rl.key === 18 && rl.value.includes(1)));
         if (isRare) minRaresNeeded = Math.max(minRaresNeeded, r.count || 0);
@@ -191,7 +196,7 @@ export class SbcBuilder {
     const pool = this._clubPlayersMemory.filter(p => {
         if (settings.untradOnly && p.tradable === true) return false;
         if (settings.excludedLeagues.includes(p.leagueId!)) return false;
-        // EXCLUDE SPECIALS (TOTW Allowed only if rarity requirement found)
+        // EXCLUDE SPECIALS unless required
         const isStandard = p.rareflag === 0 || p.rareflag === 1;
         if (!isStandard) return false;
         return true;
@@ -214,8 +219,9 @@ export class SbcBuilder {
 
     [...buckets, ...(globalLevel ? [{ ...globalLevel, count: 11 }] : [])].forEach(bucket => {
       let count = 0;
+      const targetCount = (bucket.count === 11 || bucket.count === -1 ? activeSlots.length : bucket.count);
       activeSlots.forEach((slot: any, i: number) => {
-        if (selected[i] || count >= (bucket.count === 11 || bucket.count === -1 ? activeSlots.length : bucket.count)) return;
+        if (selected[i] || count >= targetCount) return;
         let match = (raresInserted < minRaresNeeded) ? findMatch(bucket, 1) : findMatch(bucket, 0, bucket.level !== 'gold');
         if (!match) match = findMatch(bucket, 0, true);
         if (match) {
@@ -312,15 +318,14 @@ export class SbcBuilder {
         for (let k in col) {
             const val = this.getCleanValue(col[k]);
             const key = parseInt(k);
-            if (key === 19) {
-                const cleanVal = Array.isArray(val) ? val[0] : val;
-                targetRating = Math.max(targetRating, Number(cleanVal) || 0);
-            }
+            if (key === 19) targetRating = Math.max(targetRating, Number(Array.isArray(val) ? val[0] : val) || 0);
             if (key === 11) (Array.isArray(val) ? val : [val]).forEach(l => detectedLeagues.add(l));
             if (key === 18 && val.includes(3)) isTotwReq = true;
         }
     });
 
+    log(`Goal: ${targetRating} OVR | Required Leagues: ${Array.from(detectedLeagues).join(',')}`);
+    
     const discoveryLeagues = Array.from(detectedLeagues).slice(0, 3);
     await Promise.all(discoveryLeagues.map(l => this.fetchItems({ league: l, count: 150 })));
     await this.primeInventory();
@@ -331,7 +336,6 @@ export class SbcBuilder {
         if (settings.excludedLeagues.includes(p.leagueId!)) return false;
         if (p.rating >= 83) return false;
         if (globalLeagues.length > 0 && !globalLeagues.includes(p.leagueId!)) return false;
-        // SPECIAL PROTECTION: NO TOTW UNLESS REQUIRED
         const isStandard = p.rareflag === 0 || p.rareflag === 1 || (isTotwReq && (p.rarityId === 3 || p.rareflag === 3));
         if (!isStandard) return false;
         return true;
@@ -359,19 +363,15 @@ export class SbcBuilder {
         });
     };
 
-    // --- NEW CHEM-FIRST PIPELINE ---
-    // Pass 1: STORAGE + POSITION (Best chemistry, clear clogs)
-    fillPass('storage', true);
-    // Pass 2: CLUB + POSITION (Secure remaining chemistry)
-    fillPass('club', true);
-    // Pass 3: STORAGE + RANDOM (Clear remaining clogs)
-    fillPass('storage', false);
-    // Pass 4: CLUB + RANDOM (Final fulfillment)
-    fillPass('club', false);
+    // CHEM-FIRST PRIORITY:
+    fillPass('storage', true); // 1. Storage matches
+    fillPass('club', true);    // 2. Club matches (Secure chem)
+    fillPass('storage', false); // 3. Storage leftovers (Dump clogs)
+    fillPass('club', false);    // 4. Club leftovers
 
-    // --- RATING BRIDGE PASS ---
+    // --- CHEM-AWARE RATING BRIDGE ---
     if (targetRating > 0) {
-        log(`Balancing Rating to hit ${targetRating}...`);
+        log(`Balancing Rating to ${targetRating}...`);
         let bridgeAttempts = 0;
         while (bridgeAttempts < 50 && this.calculateRating(selected) < targetRating) {
             bridgeAttempts++;
@@ -379,8 +379,18 @@ export class SbcBuilder {
             const upIdx = selected.findIndex(s => s && s.rating === minR);
             if (upIdx === -1) break;
             const currentItem = selected[upIdx]!;
-            const upgrade = pool.find(p => !usedIds.has(p.id) && !usedPersonaIds.has(p._personaId!) && p.rating > currentItem.rating && p.leagueId === currentItem.leagueId);
+            const slot = activeSlots[upIdx];
+            const slotPos = SbcBuilder.normalizePos(slot.position?.id || slot._position);
+            const wasPosMatch = SbcBuilder.normalizePos(currentItem.preferredPosition) === slotPos;
+
+            // Try to find an upgrade who ALSO matches position if the previous one did
+            let upgrade = pool.find(p => !usedIds.has(p.id) && !usedPersonaIds.has(p._personaId!) && p.rating > currentItem.rating && p.leagueId === currentItem.leagueId && (wasPosMatch ? SbcBuilder.normalizePos(p.preferredPosition) === slotPos : true));
+            
+            // Fallback to any upgrade from same league if perfect match not found
+            if (!upgrade) upgrade = pool.find(p => !usedIds.has(p.id) && !usedPersonaIds.has(p._personaId!) && p.rating > currentItem.rating && p.leagueId === currentItem.leagueId);
+
             if (upgrade) {
+                console.log(`[BRIDGE] Upgrading Slot ${slot.index}: ${currentItem.rating} -> ${upgrade.rating} (${upgrade._staticData?.name})`);
                 usedIds.delete(currentItem.id); usedPersonaIds.delete(currentItem._personaId!);
                 selected[upIdx] = upgrade; usedIds.add(upgrade.id); usedPersonaIds.add(upgrade._personaId!);
             } else break;
