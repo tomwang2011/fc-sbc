@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC SBC Enhanced Builder
 // @namespace    fc-sbc-builder
-// @version      1.0.13
+// @version      1.0.14
 // @author       tomwang
 // @description  Optimal SBC builder with Storage-First priority
 // @license      ISC
@@ -542,22 +542,7 @@
     static normalizePos(id) {
       if (!id && id !== 0) return null;
       const rawId = typeof id === "object" ? id.id : id;
-      const map = {
-        2: 3,
-        8: 7,
-        4: 5,
-        6: 5,
-        9: 10,
-        11: 10,
-        13: 14,
-        15: 14,
-        17: 18,
-        19: 18,
-        20: 21,
-        22: 21,
-        24: 25,
-        26: 25
-      };
+      const map = { 2: 3, 8: 7, 4: 5, 6: 5, 9: 10, 11: 10, 13: 14, 15: 14, 17: 18, 19: 18, 20: 21, 22: 21, 24: 25, 26: 25 };
       return map[rawId] || rawId;
     }
 static async solveEfficient(log, settings) {
@@ -637,19 +622,24 @@ static async solveDeClogger(log, settings) {
       const ctx = this.getSbcContext();
       if (!ctx) return log("❌ SBC Screen Not Found");
       const { challenge, squad, controller } = ctx;
-      log("Checking Anchor...");
+      log("Analyzing Requirements...");
       let isTotwRequired = false;
+      let targetRating = 0;
       (challenge.eligibilityRequirements || []).forEach((r2) => {
-        const rules = this.getCleanValue(r2.kvPairs._collection || r2.kvPairs);
-        if (rules.some && rules.some((rl) => rl.key === 18 && rl.value.includes(3))) isTotwRequired = true;
+        const col = r2.kvPairs._collection || r2.kvPairs;
+        for (let k2 in col) {
+          const val = this.getCleanValue(col[k2]);
+          const key = parseInt(k2);
+          if (key === 18 && (val === 3 || Array.isArray(val) && val.includes(3))) isTotwRequired = true;
+          if (key === 19) targetRating = Math.max(targetRating, Number(Array.isArray(val) ? val[0] : val) || 0);
+        }
       });
+      log(`Target: ${targetRating} OVR | TOTW Required: ${isTotwRequired}`);
       await this.primeInventory(isTotwRequired ? ["special"] : ["gold"]);
       const pool = this._clubPlayersMemory.filter((p2) => {
         if (settings.untradOnly && p2.tradable === true) return false;
         if (settings.excludedLeagues.includes(p2.leagueId)) return false;
-        if (p2.rating >= 89) return false;
-        const isStandard = p2.rareflag === 0 || p2.rareflag === 1 || isTotwRequired && (p2.rarityId === 3 || p2.rareflag === 3);
-        if (!isStandard) return false;
+        if (p2.rating >= 89 || !!p2.evolutionInfo || p2.rareflag === 116) return false;
         return true;
       }).sort((a2, b2) => a2._sourcePriority - b2._sourcePriority || a2.rating - b2.rating);
       const usedPersonaIds = new Set();
@@ -658,17 +648,18 @@ static async solveDeClogger(log, settings) {
       const selected = new Array(activeSlots.length).fill(null);
       let anchor = isTotwRequired ? pool.find((p2) => p2.rarityId === 3 || p2.rareflag === 3) : pool.find((p2) => p2.rating >= 87 && p2.rating <= 88 && p2.rareflag === 1);
       if (anchor) {
+        console.log(`[DECISION] Anchor: ${anchor._staticData?.name} (${anchor.rating}) [Source: ${anchor._sourceType}]`);
         selected[0] = anchor;
         usedIds.add(anchor.id);
         usedPersonaIds.add(anchor._personaId);
-      } else {
-        return log("❌ No valid Anchor found.");
+      } else if (isTotwRequired) {
+        return log("❌ No Untradeable TOTW found.");
       }
       const clogs = { 83: 0, 84: 0 };
       pool.forEach((p2) => {
         if (p2._sourceType === "storage" && (p2.rating === 83 || p2.rating === 84)) clogs[p2.rating]++;
       });
-      let pattern = anchor.rating >= 88 ? [{ r: 83, c: 10 }] : clogs[84] >= 6 ? [{ r: 84, c: 6 }, { r: 83, c: 4 }] : [{ r: 87, c: 1 }, { r: 83, c: 9 }];
+      let pattern = anchor && anchor.rating >= 88 ? [{ r: 83, c: 10 }] : clogs[84] >= 6 ? [{ r: 84, c: 6 }, { r: 83, c: 4 }] : [{ r: 87, c: 1 }, { r: 83, c: 9 }];
       pattern.forEach((pReq) => {
         let count = 0;
         pool.filter((p2) => p2.rating === pReq.r && p2.rareflag <= 1).forEach((p2) => {
@@ -678,6 +669,7 @@ static async solveDeClogger(log, settings) {
             usedIds.add(p2.id);
             usedPersonaIds.add(p2._personaId);
             count++;
+            console.log(`[DECISION] Pattern Slot: ${p2._staticData?.name} (${p2.rating})`);
           }
         });
       });
@@ -690,13 +682,39 @@ static async solveDeClogger(log, settings) {
           usedPersonaIds.add(filler._personaId);
         }
       });
+      if (targetRating > 0) {
+        log("Optimizing fodder usage...");
+        let optAttempts = 0;
+        while (optAttempts < 50) {
+          optAttempts++;
+          const currentRating = this.calculateRating(selected);
+          if (currentRating <= targetRating) break;
+          const ratings = selected.map((s2, idx) => ({ rating: s2.rating, index: idx })).filter((x2) => x2.index !== 0);
+          const maxR = Math.max(...ratings.map((r2) => r2.rating));
+          const downIdx = ratings.find((r2) => r2.rating === maxR).index;
+          const currentItem = selected[downIdx];
+          const downgrade = pool.find((p2) => !usedIds.has(p2.id) && !usedPersonaIds.has(p2._personaId) && p2.rating < currentItem.rating && p2.rareflag <= 1);
+          if (downgrade) {
+            const tempSquad = [...selected];
+            tempSquad[downIdx] = downgrade;
+            if (this.calculateRating(tempSquad) >= targetRating) {
+              console.log(`[OPTIMIZE] Downgrading Slot ${downIdx}: ${currentItem.rating} -> ${downgrade.rating} (${downgrade._staticData?.name})`);
+              usedIds.delete(currentItem.id);
+              usedPersonaIds.delete(currentItem._personaId);
+              selected[downIdx] = downgrade;
+              usedIds.add(downgrade.id);
+              usedPersonaIds.add(downgrade._personaId);
+            } else break;
+          } else break;
+        }
+      }
       const finalArray = new Array(23).fill(null);
       activeSlots.forEach((slot, i2) => {
         if (selected[i2]) finalArray[slot.index] = selected[i2];
       });
       squad.setPlayers(finalArray);
       await this.saveSquad(challenge, squad, controller);
-      log("✅ De-Clogger Complete.");
+      log(`✅ De-Clogger Complete. Rating: ${this.calculateRating(selected)}`);
     }
 static async solveLeague(log, settings) {
       const ctx = this.getSbcContext();
@@ -902,7 +920,7 @@ u$1(
               className: "animate-in slide-in-from-left-4 fade-in duration-300",
               children: [
 u$1("div", { className: "flex justify-between items-center mb-6", children: [
-u$1("h2", { className: "text-xs font-black text-white tracking-widest uppercase opacity-60", children: "SBC Master V1.0.13" }),
+u$1("h2", { className: "text-xs font-black text-white tracking-widest uppercase opacity-60", children: "SBC Master V1.0.14" }),
 u$1(
                     "button",
                     {

@@ -149,14 +149,7 @@ export class SbcBuilder {
   public static normalizePos(id: any): number | null {
     if (!id && id !== 0) return null;
     const rawId = typeof id === 'object' ? id.id : id;
-    // Expanded Mapping: 
-    // 2/3: LWB/LB, 7/8: RB/RWB, 4/5/6: CB/SW, 9/10/11: CDM, 13/14/15: CM, 17/18/19: CAM, 20/21/22: RW/RF/RM, 24/25/26: LW/LF/LM
-    const map: Record<number, number> = { 
-        2: 3, 8: 7, 4: 5, 6: 5, 
-        9: 10, 11: 10, 13: 14, 15: 14, 
-        17: 18, 19: 18, 20: 21, 22: 21, 
-        24: 25, 26: 25 
-    };
+    const map: Record<number, number> = { 2: 3, 8: 7, 4: 5, 6: 5, 9: 10, 11: 10, 13: 14, 15: 14, 17: 18, 19: 18, 20: 21, 22: 21, 24: 25, 26: 25 };
     return map[rawId] || rawId;
   }
 
@@ -196,7 +189,6 @@ export class SbcBuilder {
     const pool = this._clubPlayersMemory.filter(p => {
         if (settings.untradOnly && p.tradable === true) return false;
         if (settings.excludedLeagues.includes(p.leagueId!)) return false;
-        // EXCLUDE SPECIALS unless required
         const isStandard = p.rareflag === 0 || p.rareflag === 1;
         if (!isStandard) return false;
         return true;
@@ -245,21 +237,26 @@ export class SbcBuilder {
     if (!ctx) return log("❌ SBC Screen Not Found");
     const { challenge, squad, controller } = ctx;
 
-    log("Checking Anchor...");
+    log("Analyzing Requirements...");
     let isTotwRequired = false;
+    let targetRating = 0;
     (challenge.eligibilityRequirements || []).forEach((r: any) => {
-        const rules = this.getCleanValue(r.kvPairs._collection || r.kvPairs);
-        if (rules.some && rules.some((rl: any) => rl.key === 18 && rl.value.includes(3))) isTotwRequired = true;
+        const col = r.kvPairs._collection || r.kvPairs;
+        for (let k in col) {
+            const val = this.getCleanValue(col[k]);
+            const key = parseInt(k);
+            if (key === 18 && (val === 3 || (Array.isArray(val) && val.includes(3)))) isTotwRequired = true;
+            if (key === 19) targetRating = Math.max(targetRating, Number(Array.isArray(val) ? val[0] : val) || 0);
+        }
     });
 
+    log(`Target: ${targetRating} OVR | TOTW Required: ${isTotwRequired}`);
     await this.primeInventory(isTotwRequired ? ['special'] : ['gold']);
 
     const pool = this._clubPlayersMemory.filter(p => {
         if (settings.untradOnly && p.tradable === true) return false;
         if (settings.excludedLeagues.includes(p.leagueId!)) return false;
-        if (p.rating >= 89) return false;
-        const isStandard = p.rareflag === 0 || p.rareflag === 1 || (isTotwRequired && (p.rarityId === 3 || p.rareflag === 3));
-        if (!isStandard) return false;
+        if (p.rating >= 89 || !!p.evolutionInfo || p.rareflag === 116) return false;
         return true;
     }).sort((a,b) => (a._sourcePriority! - b._sourcePriority!) || (a.rating - b.rating));
 
@@ -268,16 +265,19 @@ export class SbcBuilder {
     const activeSlots = squad.getSBCSlots().filter((s: any) => !s.isBrick() && s.index <= 10);
     const selected: (EAItem | null)[] = new Array(activeSlots.length).fill(null);
 
+    // 1. Mandatory Anchor (Respecting TOTW Requirement)
     let anchor = isTotwRequired ? pool.find(p => p.rarityId === 3 || p.rareflag === 3) : pool.find(p => p.rating >= 87 && p.rating <= 88 && p.rareflag === 1);
     if (anchor) {
+        console.log(`[DECISION] Anchor: ${anchor._staticData?.name} (${anchor.rating}) [Source: ${anchor._sourceType}]`);
         selected[0] = anchor; usedIds.add(anchor.id); usedPersonaIds.add(anchor._personaId!);
-    } else {
-        return log("❌ No valid Anchor found.");
+    } else if (isTotwRequired) {
+        return log("❌ No Untradeable TOTW found.");
     }
 
+    // 2. Pattern Fill
     const clogs = { 83: 0, 84: 0 };
     pool.forEach(p => { if (p._sourceType === 'storage' && (p.rating === 83 || p.rating === 84)) (clogs as any)[p.rating]++; });
-    let pattern = (anchor.rating >= 88) ? [{ r: 83, c: 10 }] : (clogs[84] >= 6 ? [{ r: 84, c: 6 }, { r: 83, c: 4 }] : [{ r: 87, c: 1 }, { r: 83, c: 9 }]);
+    let pattern = (anchor && anchor.rating >= 88) ? [{ r: 83, c: 10 }] : (clogs[84] >= 6 ? [{ r: 84, c: 6 }, { r: 83, c: 4 }] : [{ r: 87, c: 1 }, { r: 83, c: 9 }]);
 
     pattern.forEach(pReq => {
         let count = 0;
@@ -285,21 +285,55 @@ export class SbcBuilder {
             const idx = selected.findIndex(s => s === null);
             if (count < pReq.c && idx !== -1 && !usedIds.has(p.id) && !usedPersonaIds.has(p._personaId!)) {
                 selected[idx] = p; usedIds.add(p.id); usedPersonaIds.add(p._personaId!); count++;
+                console.log(`[DECISION] Pattern Slot: ${p._staticData?.name} (${p.rating})`);
             }
         });
     });
 
+    // 3. Failsafe remainder
     activeSlots.forEach((slot: any, i: number) => {
         if (selected[i]) return;
         const filler = pool.find(p => !usedIds.has(p.id) && !usedPersonaIds.has(p._personaId!) && p.rareflag <= 1);
         if (filler) { selected[i] = filler; usedIds.add(filler.id); usedPersonaIds.add(filler._personaId!); }
     });
 
+    // --- DOWNWARD OPTIMIZATION PASS ---
+    if (targetRating > 0) {
+        log("Optimizing fodder usage...");
+        let optAttempts = 0;
+        while (optAttempts < 50) {
+            optAttempts++;
+            const currentRating = this.calculateRating(selected);
+            if (currentRating <= targetRating) break;
+
+            // Find highest rated non-anchor player
+            const ratings = selected.map((s, idx) => ({ rating: s!.rating, index: idx })).filter(x => x.index !== 0);
+            const maxR = Math.max(...ratings.map(r => r.rating));
+            const downIdx = ratings.find(r => r.rating === maxR)!.index;
+            const currentItem = selected[downIdx]!;
+
+            // Find a lower rated player in same league (or any league if not strict)
+            const downgrade = pool.find(p => !usedIds.has(p.id) && !usedPersonaIds.has(p._personaId!) && p.rating < currentItem.rating && p.rareflag <= 1);
+            
+            if (downgrade) {
+                // Peek at new rating
+                const tempSquad = [...selected];
+                tempRange: tempSquad[downIdx] = downgrade;
+                if (this.calculateRating(tempSquad) >= targetRating) {
+                    console.log(`[OPTIMIZE] Downgrading Slot ${downIdx}: ${currentItem.rating} -> ${downgrade.rating} (${downgrade._staticData?.name})`);
+                    usedIds.delete(currentItem.id); usedPersonaIds.delete(currentItem._personaId!);
+                    selected[downIdx] = downgrade;
+                    usedIds.add(downgrade.id); usedPersonaIds.add(downgrade._personaId!);
+                } else break;
+            } else break;
+        }
+    }
+
     const finalArray = new Array(23).fill(null);
     activeSlots.forEach((slot: any, i: number) => { if (selected[i]) finalArray[slot.index] = selected[i]; });
     squad.setPlayers(finalArray);
     await this.saveSquad(challenge, squad, controller);
-    log("✅ De-Clogger Complete.");
+    log(`✅ De-Clogger Complete. Rating: ${this.calculateRating(selected)}`);
   }
 
   // --- SOLVER: LEAGUE ---
@@ -363,13 +397,8 @@ export class SbcBuilder {
         });
     };
 
-    // CHEM-FIRST PRIORITY:
-    fillPass('storage', true); // 1. Storage matches
-    fillPass('club', true);    // 2. Club matches (Secure chem)
-    fillPass('storage', false); // 3. Storage leftovers (Dump clogs)
-    fillPass('club', false);    // 4. Club leftovers
+    fillPass('storage', true); fillPass('club', true); fillPass('storage', false); fillPass('club', false);
 
-    // --- CHEM-AWARE RATING BRIDGE ---
     if (targetRating > 0) {
         log(`Balancing Rating to ${targetRating}...`);
         let bridgeAttempts = 0;
@@ -382,13 +411,8 @@ export class SbcBuilder {
             const slot = activeSlots[upIdx];
             const slotPos = SbcBuilder.normalizePos(slot.position?.id || slot._position);
             const wasPosMatch = SbcBuilder.normalizePos(currentItem.preferredPosition) === slotPos;
-
-            // Try to find an upgrade who ALSO matches position if the previous one did
             let upgrade = pool.find(p => !usedIds.has(p.id) && !usedPersonaIds.has(p._personaId!) && p.rating > currentItem.rating && p.leagueId === currentItem.leagueId && (wasPosMatch ? SbcBuilder.normalizePos(p.preferredPosition) === slotPos : true));
-            
-            // Fallback to any upgrade from same league if perfect match not found
             if (!upgrade) upgrade = pool.find(p => !usedIds.has(p.id) && !usedPersonaIds.has(p._personaId!) && p.rating > currentItem.rating && p.leagueId === currentItem.leagueId);
-
             if (upgrade) {
                 console.log(`[BRIDGE] Upgrading Slot ${slot.index}: ${currentItem.rating} -> ${upgrade.rating} (${upgrade._staticData?.name})`);
                 usedIds.delete(currentItem.id); usedPersonaIds.delete(currentItem._personaId!);
