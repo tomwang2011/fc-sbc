@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC SBC Enhanced Builder
 // @namespace    fc-sbc-builder
-// @version      1.0.9
+// @version      1.0.10
 // @author       tomwang
 // @description  Optimal SBC builder with Storage-First priority
 // @license      ISC
@@ -882,7 +882,7 @@ u$1(
               className: "animate-in slide-in-from-left-4 fade-in duration-300",
               children: [
 u$1("div", { className: "flex justify-between items-center mb-6", children: [
-u$1("h2", { className: "text-xs font-black text-white tracking-widest uppercase opacity-60", children: "SBC Master V1.0.9" }),
+u$1("h2", { className: "text-xs font-black text-white tracking-widest uppercase opacity-60", children: "SBC Master V1.0.10" }),
 u$1(
                     "button",
                     {
