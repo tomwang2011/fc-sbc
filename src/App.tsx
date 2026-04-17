@@ -54,38 +54,38 @@ export function App() {
   };
 
   return (
-    <div className="fixed top-2 right-2 z-[9999999] pointer-events-auto font-sans select-none">
-      {/* Floating Toggle Bubble */}
+    <div className="fixed top-1/2 left-2 -translate-y-1/2 z-[9999999] pointer-events-auto font-sans select-none">
+      {/* Floating Toggle Bubble - Left Side */}
       <button
         onClick={() => {
             setIsOpen(!isOpen);
             if (!isOpen && stats.total === 0) handleScan();
         }}
         style={{ 
-            background: isOpen ? '#ef4444' : '#4f46e5', 
-            width: '48px', height: '48px', 
-            boxShadow: '0 10px 20px rgba(0,0,0,0.4)',
+            background: isOpen ? '#ef4444' : 'rgba(79, 70, 229, 0.9)', 
+            width: '44px', height: '44px', 
+            boxShadow: '0 8px 16px rgba(0,0,0,0.5)',
             opacity: '1 !important'
         }}
-        className="rounded-full text-white font-bold flex items-center justify-center transition-all hover:scale-110 border-2 border-white/20"
+        className="rounded-full text-white font-bold flex items-center justify-center transition-all hover:scale-110 border-2 border-white/30"
       >
-        <span className="text-2xl">{isOpen ? '✕' : '⚡'}</span>
+        <span className="text-xl">{isOpen ? '✕' : '⚡'}</span>
       </button>
 
-      {/* Main Panel */}
+      {/* Main Panel - Expanding from Left */}
       {isOpen && (
         <div 
             style={{ 
                 backgroundColor: '#09090b', 
                 opacity: '1 !important', 
-                border: '1px solid #27272a',
-                width: 'calc(100vw - 16px)',
+                border: '1px solid #3f3f46',
+                width: 'calc(100vw - 20px)',
                 maxWidth: '320px'
             }}
-            className="absolute top-14 right-0 rounded-2xl shadow-[0_25px_60px_rgba(0,0,0,0.8)] p-5 animate-in zoom-in-95 fade-in duration-200"
+            className="absolute top-1/2 left-12 -translate-y-1/2 rounded-2xl shadow-[0_30px_70px_rgba(0,0,0,0.9)] p-5 animate-in slide-in-from-left-4 fade-in duration-200"
         >
           <div className="flex justify-between items-center mb-5">
-            <h2 className="text-sm font-black text-white tracking-widest uppercase">SBC Solver V1.5</h2>
+            <h2 className="text-xs font-black text-white tracking-widest uppercase opacity-80">SBC Master V1.6</h2>
             <button 
               onClick={handleScan}
               disabled={isScanning}
@@ -96,35 +96,32 @@ export function App() {
             </button>
           </div>
           
-          <div className="space-y-5">
-            {/* Stats Grid - Large Touch Targets */}
-            <div className="grid grid-cols-3 gap-3">
-              <div style={{ background: '#18181b' }} className="p-3 rounded-xl text-center border border-zinc-800 shadow-sm">
-                <div className="text-[9px] text-zinc-500 font-bold uppercase mb-1">Club</div>
-                <div className="font-black text-white text-base">{stats.total}</div>
+          <div className="space-y-4">
+            {/* Stats Grid */}
+            <div className="grid grid-cols-3 gap-2">
+              <div style={{ background: '#18181b' }} className="p-2.5 rounded-xl text-center border border-zinc-800">
+                <div className="text-[8px] text-zinc-500 font-bold uppercase mb-1">Club</div>
+                <div className="font-black text-white text-sm">{stats.total}</div>
               </div>
-              <div style={{ background: '#172554' }} className="p-3 rounded-xl text-center border border-blue-900 shadow-sm">
-                <div className="text-[9px] text-blue-400 font-bold uppercase mb-1">Storage</div>
-                <div className="font-black text-blue-300 text-base">{stats.sbcStorage}</div>
+              <div style={{ background: '#172554' }} className="p-2.5 rounded-xl text-center border border-blue-900">
+                <div className="text-[8px] text-blue-400 font-bold uppercase mb-1">Storage</div>
+                <div className="font-black text-blue-300 text-sm">{stats.sbcStorage}</div>
               </div>
-              <div style={{ background: '#431407' }} className="p-3 rounded-xl text-center border border-orange-900 shadow-sm">
-                <div className="text-[9px] text-orange-400 font-bold uppercase mb-1">Unasgn</div>
-                <div className="font-black text-orange-300 text-base">{stats.unassigned}</div>
+              <div style={{ background: '#431407' }} className="p-2.5 rounded-xl text-center border border-orange-900">
+                <div className="text-[8px] text-orange-400 font-bold uppercase mb-1">Unasgn</div>
+                <div className="font-black text-orange-300 text-sm">{stats.unassigned}</div>
               </div>
             </div>
 
-            {/* League Ignoring Section */}
-            <div style={{ background: '#18181b' }} className="p-4 rounded-xl border border-zinc-800">
-                <h3 className="text-[9px] font-black text-zinc-500 uppercase mb-3 tracking-widest text-center">Protected Leagues</h3>
-                <div className="grid grid-cols-4 gap-2">
+            {/* League Ignoring Grid */}
+            <div style={{ background: '#18181b' }} className="p-3.5 rounded-xl border border-zinc-800">
+                <h3 className="text-[9px] font-black text-zinc-500 uppercase mb-2 tracking-widest text-center">Ignore Leagues</h3>
+                <div className="grid grid-cols-4 gap-1.5">
                     {leagues.map(l => (
                         <button
                             onClick={() => toggleLeague(l.id)}
-                            style={{ 
-                                background: excludedLeagues.includes(l.id) ? '#dc2626' : '#27272a',
-                                minHeight: '34px'
-                            }}
-                            className={`text-[9px] font-black rounded-lg transition-all ${excludedLeagues.includes(l.id) ? 'text-white border-red-800 scale-95 shadow-inner' : 'text-zinc-400 border-zinc-700 shadow-sm'} border`}
+                            style={{ background: excludedLeagues.includes(l.id) ? '#dc2626' : '#27272a' }}
+                            className={`text-[8px] font-black py-2 rounded-lg transition-all ${excludedLeagues.includes(l.id) ? 'text-white border-red-800 shadow-inner' : 'text-zinc-500 border-zinc-800'} border`}
                         >
                             {l.name}
                         </button>
@@ -132,25 +129,25 @@ export function App() {
                 </div>
             </div>
 
-            {/* Global Settings */}
-            <div style={{ background: '#18181b' }} className="p-4 rounded-xl border border-zinc-800">
-                <label className="flex items-center justify-between cursor-pointer group">
-                    <span className="text-[10px] font-black text-zinc-300 uppercase tracking-widest">Untradeable Only</span>
+            {/* Untradeable Checkbox */}
+            <div style={{ background: '#18181b' }} className="p-3.5 rounded-xl border border-zinc-800">
+                <label className="flex items-center justify-between cursor-pointer">
+                    <span className="text-[9px] font-black text-zinc-400 uppercase tracking-widest">Untradeable Only</span>
                     <div className="relative">
                         <input type="checkbox" className="sr-only" checked={untradOnly} onChange={(e) => setUntradOnly(e.currentTarget.checked)} />
-                        <div className={`w-12 h-6 rounded-full transition-colors ${untradOnly ? 'bg-indigo-600' : 'bg-zinc-700'}`}></div>
-                        <div className={`absolute left-1 top-1 w-4 h-4 bg-white rounded-full transition-transform ${untradOnly ? 'translate-x-6' : ''}`}></div>
+                        <div className={`w-10 h-5 rounded-full transition-colors ${untradOnly ? 'bg-indigo-600' : 'bg-zinc-700'}`}></div>
+                        <div className={`absolute left-1 top-1 w-3 h-3 bg-white rounded-full transition-transform ${untradOnly ? 'translate-x-5' : ''}`}></div>
                     </div>
                 </label>
             </div>
 
-            {/* Heavy Action Buttons */}
-            <div className="space-y-3 pt-2">
+            {/* Big Action Buttons */}
+            <div className="space-y-2 pt-1">
               <button
                 disabled={isSolving}
                 onClick={() => runSolver('league')}
-                style={{ background: '#4f46e5', borderBottom: '4px solid #3730a3', minHeight: '48px' }}
-                className="w-full text-white rounded-xl text-xs font-black shadow-lg transition-all active:translate-y-[2px] active:border-b-0 flex items-center justify-center gap-2 uppercase"
+                style={{ background: '#4f46e5', borderBottom: '3px solid #3730a3', minHeight: '44px' }}
+                className="w-full text-white rounded-xl text-[10px] font-black shadow-lg transition-all active:translate-y-[2px] active:border-b-0 flex items-center justify-center gap-2 uppercase tracking-tight"
               >
                 ⚽ League Solver
               </button>
@@ -158,8 +155,8 @@ export function App() {
               <button
                 disabled={isSolving}
                 onClick={() => runSolver('declog')}
-                style={{ background: '#d97706', borderBottom: '4px solid #92400e', minHeight: '48px' }}
-                className="w-full text-white rounded-xl text-xs font-black shadow-lg transition-all active:translate-y-[2px] active:border-b-0 flex items-center justify-center gap-2 uppercase"
+                style={{ background: '#d97706', borderBottom: '3px solid #92400e', minHeight: '44px' }}
+                className="w-full text-white rounded-xl text-[10px] font-black shadow-lg transition-all active:translate-y-[2px] active:border-b-0 flex items-center justify-center gap-2 uppercase tracking-tight"
               >
                 📦 De-Clogger (83+)
               </button>
@@ -167,16 +164,16 @@ export function App() {
               <button
                 disabled={isSolving}
                 onClick={() => runSolver('efficient')}
-                style={{ background: '#059669', borderBottom: '4px solid #065f46', minHeight: '48px' }}
-                className="w-full text-white rounded-xl text-xs font-black shadow-lg transition-all active:translate-y-[2px] active:border-b-0 flex items-center justify-center gap-2 uppercase"
+                style={{ background: '#059669', borderBottom: '3px solid #065f46', minHeight: '44px' }}
+                className="w-full text-white rounded-xl text-[10px] font-black shadow-lg transition-all active:translate-y-[2px] active:border-b-0 flex items-center justify-center gap-2 uppercase tracking-tight"
               >
                 💎 Rare/Common
               </button>
             </div>
             
-            {/* Status Feedback */}
-            <div style={{ background: '#000000' }} className="rounded-xl p-4 min-h-[56px] flex items-center justify-center border border-zinc-800 shadow-inner">
-                <p className="text-[10px] text-zinc-400 font-bold text-center leading-tight uppercase tracking-widest">
+            {/* Opaque Status Bar */}
+            <div style={{ background: '#000' }} className="rounded-xl p-3 min-h-[50px] flex items-center justify-center border border-zinc-800 shadow-inner">
+                <p className="text-[9px] text-zinc-400 font-bold text-center leading-tight uppercase tracking-widest">
                     {status}
                 </p>
             </div>
