@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC SBC Enhanced Builder
 // @namespace    fc-sbc-builder
-// @version      1.0.11
+// @version      1.0.12
 // @author       tomwang
 // @description  Optimal SBC builder with Storage-First priority
 // @license      ISC
@@ -435,15 +435,6 @@
       const win = typeof unsafeWindow !== "undefined" ? unsafeWindow : window;
       try {
         const root = win.getAppMain().getRootViewController();
-        const findController = (node) => {
-          if (!node) return null;
-          if (node._squad && node._challenge) return node;
-          const children = [...node.childViewControllers || [], ...node.presentedViewController ? [node.presentedViewController] : [], ...node.currentController ? [node.currentController] : [], ...node._viewControllers || []];
-          for (const child of children) {
-            if (findController(child)) return findController(child);
-          }
-          return null;
-        };
         const find = (n2) => {
           if (!n2) return null;
           if (n2._squad && n2._challenge) return n2;
@@ -470,7 +461,7 @@
         const criteria = new win.UTSearchCriteriaDTO();
         const finalParams = Object.assign({
           type: "player",
-          count: 200,
+          count: 250,
           excludeLoans: true,
           isUntradeable: "true",
           searchAltPositions: true,
@@ -505,9 +496,8 @@
       const addEntities = (items, source) => {
         items.forEach((p2) => {
           if (p2 && p2.id && !allPlayers.has(p2.id)) {
-            const isStandard = p2.rareflag === 0 || p2.rareflag === 1 || p2.rarityId === 3 || p2.rareflag === 3;
             const isEvo = !!p2.evolutionInfo || p2.rareflag === 116 || p2.upgrades !== null;
-            if (!isStandard || isEvo) return;
+            if (p2.limitedUseType === 2 || isEvo) return;
             p2._sourceType = source;
             p2._sourcePriority = source === "storage" ? 0 : source === "unassigned" ? 1 : 2;
             p2._personaId = Number(p2.definitionId) % 16777216;
@@ -532,6 +522,7 @@
           squad.onDataUpdated.notify();
           if (squad.isValid) squad.isValid();
           if (controller._pushSquadToView) controller._pushSquadToView(squad);
+          else if (controller._overviewController?._pushSquadToView) controller._overviewController._pushSquadToView(squad);
           resolve(res.success);
         });
       });
@@ -583,8 +574,10 @@ static async solveEfficient(log, settings) {
       if (buckets.length === 0 && !globalLevel) globalLevel = { level: "gold", min: 75, max: 82 };
       await this.primeInventory(Array.from(levelsToDiscover));
       const pool = this._clubPlayersMemory.filter((p2) => {
-        if (settings.untradOnly && p2.tradable !== false) return false;
+        if (settings.untradOnly && p2.tradable === true) return false;
         if (settings.excludedLeagues.includes(p2.leagueId)) return false;
+        const isStandard = p2.rareflag === 0 || p2.rareflag === 1;
+        if (!isStandard) return false;
         return true;
       }).sort((a2, b2) => a2._sourcePriority - b2._sourcePriority || a2.rating - b2.rating);
       const usedPersonaIds = new Set();
@@ -607,6 +600,7 @@ static async solveEfficient(log, settings) {
           let match = raresInserted < minRaresNeeded ? findMatch(bucket, 1) : findMatch(bucket, 0, bucket.level !== "gold");
           if (!match) match = findMatch(bucket, 0, true);
           if (match) {
+            console.log(`[DECISION] Slot ${slot.index}: ${match._staticData?.name} (${match.rating})`);
             selected[i2] = match;
             usedIds.add(match.id);
             usedPersonaIds.add(match._personaId);
@@ -635,9 +629,11 @@ static async solveDeClogger(log, settings) {
       });
       await this.primeInventory(isTotwRequired ? ["special"] : ["gold"]);
       const pool = this._clubPlayersMemory.filter((p2) => {
-        if (settings.untradOnly && p2.tradable !== false) return false;
+        if (settings.untradOnly && p2.tradable === true) return false;
         if (settings.excludedLeagues.includes(p2.leagueId)) return false;
         if (p2.rating >= 89) return false;
+        const isStandard = p2.rareflag === 0 || p2.rareflag === 1 || isTotwRequired && (p2.rarityId === 3 || p2.rareflag === 3);
+        if (!isStandard) return false;
         return true;
       }).sort((a2, b2) => a2._sourcePriority - b2._sourcePriority || a2.rating - b2.rating);
       const usedPersonaIds = new Set();
@@ -680,7 +676,7 @@ static async solveDeClogger(log, settings) {
       });
       const finalArray = new Array(23).fill(null);
       activeSlots.forEach((slot, i2) => {
-        if (selected[i2]) finalArray[slot.index] = selected[i2].item || selected[i2];
+        if (selected[i2]) finalArray[slot.index] = selected[i2];
       });
       squad.setPlayers(finalArray);
       await this.saveSquad(challenge, squad, controller);
@@ -693,6 +689,7 @@ static async solveLeague(log, settings) {
       log("Analyzing Target Rating...");
       const rawReqs = challenge.eligibilityRequirements || [];
       let targetRating = 0;
+      let isTotwReq = false;
       const detectedLeagues = new Set();
       rawReqs.forEach((r2) => {
         const col = r2.kvPairs._collection || r2.kvPairs;
@@ -704,18 +701,20 @@ static async solveLeague(log, settings) {
             targetRating = Math.max(targetRating, Number(cleanVal) || 0);
           }
           if (key === 11) (Array.isArray(val) ? val : [val]).forEach((l2) => detectedLeagues.add(l2));
+          if (key === 18 && val.includes(3)) isTotwReq = true;
         }
       });
-      log(`Goal: ${targetRating} Rating | Required Leagues: ${Array.from(detectedLeagues).join(",")}`);
       const discoveryLeagues = Array.from(detectedLeagues).slice(0, 3);
       await Promise.all(discoveryLeagues.map((l2) => this.fetchItems({ league: l2, count: 150 })));
       await this.primeInventory();
       const globalLeagues = Array.from(detectedLeagues);
       const pool = this._clubPlayersMemory.filter((p2) => {
-        if (settings.untradOnly && p2.tradable !== false) return false;
+        if (settings.untradOnly && p2.tradable === true) return false;
         if (settings.excludedLeagues.includes(p2.leagueId)) return false;
         if (p2.rating >= 83) return false;
         if (globalLeagues.length > 0 && !globalLeagues.includes(p2.leagueId)) return false;
+        const isStandard = p2.rareflag === 0 || p2.rareflag === 1 || isTotwReq && (p2.rarityId === 3 || p2.rareflag === 3);
+        if (!isStandard) return false;
         return true;
       }).sort((a2, b2) => a2._sourcePriority - b2._sourcePriority || a2.rating - b2.rating);
       const usedPersonaIds = new Set();
@@ -733,6 +732,7 @@ static async solveLeague(log, settings) {
             return true;
           });
           if (match) {
+            console.log(`[DECISION] Slot ${slot.index}: ${match._staticData?.name} [PosMatch: ${matchPos}] [Source: ${match._sourceType}]`);
             selected[i2] = match;
             usedIds.add(match.id);
             usedPersonaIds.add(match._personaId);
@@ -740,11 +740,11 @@ static async solveLeague(log, settings) {
         });
       };
       fillPass("storage", true);
-      fillPass("storage", false);
       fillPass("club", true);
+      fillPass("storage", false);
       fillPass("club", false);
       if (targetRating > 0) {
-        log(`Optimizing Rating to hit ${targetRating}...`);
+        log(`Balancing Rating to hit ${targetRating}...`);
         let bridgeAttempts = 0;
         while (bridgeAttempts < 50 && this.calculateRating(selected) < targetRating) {
           bridgeAttempts++;
@@ -754,7 +754,6 @@ static async solveLeague(log, settings) {
           const currentItem = selected[upIdx];
           const upgrade = pool.find((p2) => !usedIds.has(p2.id) && !usedPersonaIds.has(p2._personaId) && p2.rating > currentItem.rating && p2.leagueId === currentItem.leagueId);
           if (upgrade) {
-            console.log(`[BRIDGE] Upgrading Slot ${upIdx}: ${currentItem.rating} -> ${upgrade.rating} (${upgrade._staticData?.name})`);
             usedIds.delete(currentItem.id);
             usedPersonaIds.delete(currentItem._personaId);
             selected[upIdx] = upgrade;
@@ -765,11 +764,11 @@ static async solveLeague(log, settings) {
       }
       const finalArray = new Array(23).fill(null);
       activeSlots.forEach((slot, i2) => {
-        if (selected[i2]) finalArray[slot.index] = selected[i2].item || selected[i2];
+        if (selected[i2]) finalArray[slot.index] = selected[i2];
       });
       squad.setPlayers(finalArray);
       await this.saveSquad(challenge, squad, controller);
-      log(`✅ League Solve Complete. Rating: ${this.calculateRating(selected)}`);
+      log(`✅ League Solve Complete.`);
     }
   }
   function App() {
@@ -884,7 +883,7 @@ u$1(
               className: "animate-in slide-in-from-left-4 fade-in duration-300",
               children: [
 u$1("div", { className: "flex justify-between items-center mb-6", children: [
-u$1("h2", { className: "text-xs font-black text-white tracking-widest uppercase opacity-60", children: "SBC Master V1.0.11" }),
+u$1("h2", { className: "text-xs font-black text-white tracking-widest uppercase opacity-60", children: "SBC Master V1.0.12" }),
 u$1(
                     "button",
                     {
