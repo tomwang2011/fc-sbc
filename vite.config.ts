@@ -20,6 +20,8 @@ export default defineConfig({
         ],
         runAt: 'document-end',
         grant: ['unsafeWindow', 'GM_xmlhttpRequest'],
+        updateURL: 'https://github.com/tomwang2011/fc-sbc/raw/main/dist/fc-sbc.user.js',
+        downloadURL: 'https://github.com/tomwang2011/fc-sbc/raw/main/dist/fc-sbc.user.js',
         author: 'tomwang',
         description: 'Optimal SBC builder with Storage-First priority',
       },
