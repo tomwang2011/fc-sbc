@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC SBC Enhanced Builder
 // @namespace    fc-sbc-builder
-// @version      1.0.15
+// @version      1.0.16
 // @author       tomwang
 // @description  Optimal SBC builder with Storage-First priority
 // @license      ISC
@@ -764,30 +764,46 @@
       const usedIds = new Set();
       const activeSlots = squad.getSBCSlots().filter((s2) => !s2.isBrick() && s2.index <= 10);
       const selected = new Array(activeSlots.length).fill(null);
-      const fillPass = (source, matchPos) => {
+      const getChem = () => {
+        const tempPlayers = new Array(23).fill(null);
         activeSlots.forEach((slot, i2) => {
-          if (selected[i2]) return;
-          const slotPos = Utils.normalizePos(slot.position?.id || slot._position);
-          const match = pool.find((p2) => {
-            if (usedIds.has(p2.id) || usedPersonaIds.has(p2._personaId)) return false;
-            if (source && p2._sourceType !== source) return false;
-            if (matchPos && Utils.normalizePos(p2.preferredPosition) !== slotPos) return false;
-            return true;
-          });
-          if (match) {
-            console.log(`[DECISION] Slot ${slot.index}: ${match._staticData?.name} [PosMatch: ${matchPos}] [Source: ${match._sourceType}]`);
-            selected[i2] = match;
-            usedIds.add(match.id);
-            usedPersonaIds.add(match._personaId);
-          }
+          if (selected[i2]) tempPlayers[slot.index] = selected[i2];
         });
+        squad.setPlayers(tempPlayers);
+        return squad.getChemistry();
       };
-      fillPass("storage", true);
-      fillPass("club", true);
-      fillPass("storage", false);
-      fillPass("club", false);
+      const fillSlot = (i2, item, reason) => {
+        selected[i2] = item;
+        usedIds.add(item.id);
+        usedPersonaIds.add(item._personaId);
+        console.log(`[DECISION] Slot ${activeSlots[i2].index}: ${item._staticData?.name} (${item.rating}) [Reason: ${reason}]`);
+      };
+      activeSlots.forEach((slot, i2) => {
+        if (selected[i2]) return;
+        const slotPos = Utils.normalizePos(slot.position?.id || slot._position);
+        const match = pool.find((p2) => p2._sourceType === "storage" && !usedIds.has(p2.id) && !usedPersonaIds.has(p2._personaId) && Utils.normalizePos(p2.preferredPosition) === slotPos);
+        if (match) fillSlot(i2, match, "Storage Pos Match");
+      });
+      if (getChem() < 10) {
+        activeSlots.forEach((slot, i2) => {
+          if (selected[i2] || getChem() >= 10) return;
+          const slotPos = Utils.normalizePos(slot.position?.id || slot._position);
+          const match = pool.find((p2) => p2._sourceType === "club" && !usedIds.has(p2.id) && !usedPersonaIds.has(p2._personaId) && Utils.normalizePos(p2.preferredPosition) === slotPos);
+          if (match) fillSlot(i2, match, "Club Chem Snipe");
+        });
+      }
+      activeSlots.forEach((slot, i2) => {
+        if (selected[i2]) return;
+        const match = pool.find((p2) => p2._sourceType === "storage" && !usedIds.has(p2.id) && !usedPersonaIds.has(p2._personaId));
+        if (match) fillSlot(i2, match, "Storage Leftover Dump");
+      });
+      activeSlots.forEach((slot, i2) => {
+        if (selected[i2]) return;
+        const match = pool.find((p2) => !usedIds.has(p2.id) && !usedPersonaIds.has(p2._personaId));
+        if (match) fillSlot(i2, match, "Club Filler");
+      });
       if (targetRating > 0) {
-        log(`Balancing Rating to ${targetRating}...`);
+        log(`Balancing Rating to hit ${targetRating}...`);
         let bridgeAttempts = 0;
         while (bridgeAttempts < 50 && Utils.calculateRating(selected) < targetRating) {
           bridgeAttempts++;
@@ -801,7 +817,7 @@
           let upgrade = pool.find((p2) => !usedIds.has(p2.id) && !usedPersonaIds.has(p2._personaId) && p2.rating > currentItem.rating && p2.leagueId === currentItem.leagueId && (wasPosMatch ? Utils.normalizePos(p2.preferredPosition) === slotPos : true));
           if (!upgrade) upgrade = pool.find((p2) => !usedIds.has(p2.id) && !usedPersonaIds.has(p2._personaId) && p2.rating > currentItem.rating && p2.leagueId === currentItem.leagueId);
           if (upgrade) {
-            console.log(`[BRIDGE] Upgrading Slot ${slot.index}: ${currentItem.rating} -> ${upgrade.rating} (${upgrade._staticData?.name})`);
+            console.log(`[BRIDGE] Upgrading Slot ${slot.index}: ${currentItem.rating} -> ${upgrade.rating}`);
             usedIds.delete(currentItem.id);
             usedPersonaIds.delete(currentItem._personaId);
             selected[upIdx] = upgrade;
@@ -945,7 +961,7 @@ u$1(
               className: "animate-in slide-in-from-left-4 fade-in duration-300",
               children: [
 u$1("div", { className: "flex justify-between items-center mb-6", children: [
-u$1("h2", { className: "text-xs font-black text-white tracking-widest uppercase opacity-60", children: "SBC Master V1.0.15" }),
+u$1("h2", { className: "text-xs font-black text-white tracking-widest uppercase opacity-60", children: "SBC Master V1.0.16" }),
 u$1(
                     "button",
                     {

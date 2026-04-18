@@ -46,41 +46,73 @@ export class LeagueSolver {
     const activeSlots = squad.getSBCSlots().filter((s: any) => !s.isBrick() && s.index <= 10);
     const selected: (EAItem | null)[] = new Array(activeSlots.length).fill(null);
 
-    const fillPass = (source: string | null, matchPos: boolean) => {
-        activeSlots.forEach((slot: any, i: number) => {
-            if (selected[i]) return;
-            const slotPos = Utils.normalizePos(slot.position?.id || slot._position);
-            const match = pool.find(p => {
-                if (usedIds.has(p.id) || usedPersonaIds.has(p._personaId!)) return false;
-                if (source && p._sourceType !== source) return false;
-                if (matchPos && Utils.normalizePos(p.preferredPosition) !== slotPos) return false;
-                return true;
-            });
-            if (match) { 
-                console.log(`[DECISION] Slot ${slot.index}: ${match._staticData?.name} [PosMatch: ${matchPos}] [Source: ${match._sourceType}]`);
-                selected[i] = match; usedIds.add(match.id); usedPersonaIds.add(match._personaId!); 
-            }
-        });
+    // Helper to calculate chemistry on the fly
+    const getChem = () => {
+        const tempPlayers = new Array(23).fill(null);
+        activeSlots.forEach((slot: any, i: number) => { if (selected[i]) tempPlayers[slot.index] = selected[i]; });
+        squad.setPlayers(tempPlayers);
+        return squad.getChemistry();
     };
 
-    fillPass('storage', true); fillPass('club', true); fillPass('storage', false); fillPass('club', false);
+    const fillSlot = (i: number, item: EAItem, reason: string) => {
+        selected[i] = item;
+        usedIds.add(item.id);
+        usedPersonaIds.add(item._personaId!);
+        console.log(`[DECISION] Slot ${activeSlots[i].index}: ${item._staticData?.name} (${item.rating}) [Reason: ${reason}]`);
+    };
 
+    // --- PHASE 1: Storage Position Match (Clear Clogs + Start Chem) ---
+    activeSlots.forEach((slot: any, i: number) => {
+        if (selected[i]) return;
+        const slotPos = Utils.normalizePos(slot.position?.id || slot._position);
+        const match = pool.find(p => p._sourceType === 'storage' && !usedIds.has(p.id) && !usedPersonaIds.has(p._personaId!) && Utils.normalizePos(p.preferredPosition) === slotPos);
+        if (match) fillSlot(i, match, "Storage Pos Match");
+    });
+
+    // --- PHASE 2: Club Position Match (Only if Chem < 10) ---
+    if (getChem() < 10) {
+        activeSlots.forEach((slot: any, i: number) => {
+            if (selected[i] || getChem() >= 10) return;
+            const slotPos = Utils.normalizePos(slot.position?.id || slot._position);
+            const match = pool.find(p => p._sourceType === 'club' && !usedIds.has(p.id) && !usedPersonaIds.has(p._personaId!) && Utils.normalizePos(p.preferredPosition) === slotPos);
+            if (match) fillSlot(i, match, "Club Chem Snipe");
+        });
+    }
+
+    // --- PHASE 3: Storage Dump (Random Positions) ---
+    activeSlots.forEach((slot: any, i: number) => {
+        if (selected[i]) return;
+        const match = pool.find(p => p._sourceType === 'storage' && !usedIds.has(p.id) && !usedPersonaIds.has(p._personaId!));
+        if (match) fillSlot(i, match, "Storage Leftover Dump");
+    });
+
+    // --- PHASE 4: Final Club Fill ---
+    activeSlots.forEach((slot: any, i: number) => {
+        if (selected[i]) return;
+        const match = pool.find(p => !usedIds.has(p.id) && !usedPersonaIds.has(p._personaId!));
+        if (match) fillSlot(i, match, "Club Filler");
+    });
+
+    // --- RATING BRIDGE PASS ---
     if (targetRating > 0) {
-        log(`Balancing Rating to ${targetRating}...`);
+        log(`Balancing Rating to hit ${targetRating}...`);
         let bridgeAttempts = 0;
         while (bridgeAttempts < 50 && Utils.calculateRating(selected) < targetRating) {
             bridgeAttempts++;
             const minR = Math.min(...selected.filter(s => s).map(s => s!.rating));
             const upIdx = selected.findIndex(s => s && s.rating === minR);
             if (upIdx === -1) break;
+
             const currentItem = selected[upIdx]!;
             const slot = activeSlots[upIdx];
             const slotPos = Utils.normalizePos(slot.position?.id || slot._position);
             const wasPosMatch = Utils.normalizePos(currentItem.preferredPosition) === slotPos;
+
             let upgrade = pool.find(p => !usedIds.has(p.id) && !usedPersonaIds.has(p._personaId!) && p.rating > currentItem.rating && p.leagueId === currentItem.leagueId && (wasPosMatch ? Utils.normalizePos(p.preferredPosition) === slotPos : true));
             if (!upgrade) upgrade = pool.find(p => !usedIds.has(p.id) && !usedPersonaIds.has(p._personaId!) && p.rating > currentItem.rating && p.leagueId === currentItem.leagueId);
+
             if (upgrade) {
-                console.log(`[BRIDGE] Upgrading Slot ${slot.index}: ${currentItem.rating} -> ${upgrade.rating} (${upgrade._staticData?.name})`);
+                console.log(`[BRIDGE] Upgrading Slot ${slot.index}: ${currentItem.rating} -> ${upgrade.rating}`);
                 usedIds.delete(currentItem.id); usedPersonaIds.delete(currentItem._personaId!);
                 selected[upIdx] = upgrade; usedIds.add(upgrade.id); usedPersonaIds.add(upgrade._personaId!);
             } else break;
