@@ -1,8 +1,8 @@
-(async function milestone12InjectionFastV23() {
+(async function milestone13ChemistryEngineV24() {
     const win = (typeof unsafeWindow !== 'undefined' ? unsafeWindow : window);
     const repo = win.repositories.Item;
 
-    console.log("%c--- 🏆 MILESTONE 12: RATING-PRIORITIZED ENGINE (V23) ---", "font-size: 16px; font-weight: bold; color: #10b981;");
+    console.log("%c--- 🏆 MILESTONE 13: CHEMISTRY-MAXIMIZING ENGINE (V24) ---", "font-size: 16px; font-weight: bold; color: #ec4899;");
 
     const findSbcContext = (node) => {
         if (!node) return null;
@@ -62,7 +62,6 @@
                 if (key === 7 && r.scope === 1) rules.maxTotalNations = Math.min(rules.maxTotalNations, val);
                 if (key === 9 && r.scope === 1) rules.maxSameNation = Math.min(rules.maxSameNation, val);
                 if (key === 5 && r.scope === 0) rules.maxTotalNations = Math.min(rules.maxTotalNations, val);
-                if (key === 12 && r.scope === 1) rules.maxTotalLeagues = Math.min(rules.maxTotalLeagues, val);
             } else {
                 const isEntity = [14, 12, 10, 11, 5, 15, 6, 7, 9].includes(key);
                 const validIds = (Array.isArray(vals) ? vals : [vals]).filter(id => id > 0);
@@ -73,8 +72,6 @@
             }
         }
     });
-
-    console.log("[RULES] Final Checklist:", rules);
 
     // --- PHASE 2: SYNC ---
     const fetchItems = (lid) => new Promise(r => {
@@ -88,31 +85,42 @@
     const pools = await Promise.all([fetchItems(null), fetchItems(13), fetchItems(53), fetchItems(19), fetchItems(31), fetchItems(16)]);
     const masterPool = pools.flat().map(p => { p._personaId = Number(p.definitionId) % 16777216; return p; })
         .filter(p => p.tradable === false && !p.evolutionInfo && p.rareflag <= 1 && p.rating < 89);
-    
-    console.log(`[SYNC] Pool Ready. Golds: ${masterPool.filter(p=>p.rating>=75).length}`);
 
     // --- PHASE 3: SOLVER ---
-    const solveStructural = (coreLid) => {
+    const runTrial = (coreLid) => {
         const selected = new Array(11).fill(null);
         const usedIds = new Set(); const usedPersonaIds = new Set();
-        const counts = { nation: new Map(), league: new Map(), club: {} };
+        const state = { nation: new Map(), league: new Map(), club: new Map() };
         let iterations = 0;
         let bestSeen = { rating: 0, chem: 0 };
 
         const updateState = (p, add) => {
             const mod = add ? 1 : -1;
-            counts.club[p.teamId] = (counts.club[p.teamId] || 0) + mod;
-            if (add) {
-                counts.nation.set(p.nationId, (counts.nation.get(p.nationId) || 0) + 1);
-                counts.league.set(p.leagueId, (counts.league.get(p.leagueId) || 0) + 1);
-            } else {
-                const nC = counts.nation.get(p.nationId) - 1; if (nC <= 0) counts.nation.delete(p.nationId); else counts.nation.set(p.nationId, nC);
-                const lC = counts.league.get(p.leagueId) - 1; if (lC <= 0) counts.league.delete(p.leagueId); else counts.league.set(p.leagueId, lC);
-            }
+            state.club.set(p.teamId, (state.club.get(p.teamId) || 0) + mod);
+            state.nation.set(p.nationId, (state.nation.get(p.nationId) || 0) + mod);
+            state.league.set(p.leagueId, (state.league.get(p.leagueId) || 0) + mod);
+        };
+
+        const getChemScore = (p) => {
+            // Chemistry Dot Thresholds
+            // Club: 2 (+1), 4 (+1), 7 (+1)
+            // Nation: 3 (+1), 6 (+1), 9 (+1)
+            // League: 3 (+1), 5 (+1), 8 (+1)
+            let score = 0;
+            const cCount = (state.club.get(p.teamId) || 0) + 1;
+            const nCount = (state.nation.get(p.nationId) || 0) + 1;
+            const lCount = (state.league.get(p.leagueId) || 0) + 1;
+
+            if ([2, 4, 7].includes(cCount)) score += 3000;
+            if ([3, 6, 9].includes(nCount)) score += 1000;
+            if ([3, 5, 8].includes(lCount)) score += 1000;
+
+            if (p.leagueId === coreLid) score += 500;
+            return score;
         };
 
         const solve = (idx) => {
-            iterations++; if (iterations > 30000) return false;
+            iterations++; if (iterations > 15000) return false;
             if (idx === 11) {
                 const tempArr = new Array(23).fill(null);
                 activeSlots.forEach((slot, i) => tempArr[slot.index] = selected[i]);
@@ -125,15 +133,16 @@
             }
 
             const slotPos = normalizePos(activeSlots[idx].position?.id || activeSlots[idx]._position);
+            
             const candidates = masterPool.filter(p => !usedIds.has(p.id) && !usedPersonaIds.has(p._personaId))
-                .filter(p => (counts.club[p.teamId] || 0) < rules.maxSameClub)
+                .filter(p => (state.club.get(p.teamId) || 0) < rules.maxSameClub)
                 .map(p => {
-                    let score = 0;
-                    if (p.leagueId === coreLid) score += 10000;
+                    let score = getChemScore(p);
+                    if (normalizePos(p.preferredPosition) === slotPos) score += 5000;
                     return { p, score };
                 })
-                .sort((a,b) => b.score - a.score || (b.p.rating - a.p.rating)) // RATING DESCENDING
-                .slice(0, 15).map(c => c.p);
+                .sort((a,b) => b.score - a.score || (b.p.rating - a.p.rating))
+                .slice(0, 12).map(c => c.p);
 
             for (const p of candidates) {
                 selected[idx] = p; usedIds.add(p.id); usedPersonaIds.add(p._personaId);
@@ -146,56 +155,46 @@
         };
 
         const result = solve(0);
-        if (!result) console.log(`[BUILD-FAIL] Core ${coreLid}: Best was R:${bestSeen.rating} C:${bestSeen.chem} after ${iterations} iters`);
+        if (!result) console.log(`[TRIAL] Core ${coreLid} failed. Best R:${bestSeen.rating} C:${bestSeen.chem}`);
         return result ? [...selected] : null;
     };
 
-    // --- PHASE 4: INJECTION ---
+    // START
     const lStats = {}; masterPool.forEach(p => lStats[p.leagueId] = (lStats[p.leagueId] || 0) + 1);
-    const targets = Object.entries(lStats).sort((a,b) => b[1]-a[1]).slice(0, 10).map(x => parseInt(x[0]));
+    const targets = Object.entries(lStats).sort((a,b) => b[1]-a[1]).slice(0, 8).map(x => parseInt(x[0]));
 
     for (const lid of targets) {
-        console.log(`[BUILD] Trial League ${lid}...`);
-        const structuralSquad = solveStructural(lid);
-        if (!structuralSquad) continue;
+        console.log(`[EXEC] Testing League ${lid}...`);
+        const squadItems = runTrial(lid);
+        if (squadItems) {
+            console.log("%c✅ SUCCESS!", "color: #10b981; font-weight: bold;");
+            // Perform Seed Injection (same as V23)
+            let currentSquad = [...squadItems];
+            let usedIds = new Set(currentSquad.map(p => p.id));
+            let usedPersonas = new Set(currentSquad.map(p => p._personaId));
 
-        console.log("[INJECT] Base squad built. Injecting seeds...");
-        let currentSquad = [...structuralSquad];
-        let usedIds = new Set(currentSquad.map(p => p.id));
-        let usedPersonas = new Set(currentSquad.map(p => p._personaId));
-
-        let injectionSuccess = true;
-        for (const seed of rules.seeds) {
-            let fulfilled = currentSquad.filter(p => (seed.type === 'club' && seed.ids.includes(p.teamId)) || (seed.type === 'nation' && seed.ids.includes(p.nationId)) || (seed.type === 'league' && seed.ids.includes(p.leagueId))).length;
-            while (fulfilled < seed.count) {
-                const candidates = masterPool.filter(p => !usedIds.has(p.id) && !usedPersonas.has(p._personaId) && ((seed.type === 'club' && seed.ids.includes(p.teamId)) || (seed.type === 'nation' && seed.ids.includes(p.nationId)) || (seed.type === 'league' && seed.ids.includes(p.leagueId))))
-                    .sort((a,b) => b.rating - a.rating);
-                const replacement = candidates[0];
-                if (!replacement) { injectionSuccess = false; break; }
-
-                const killIdx = currentSquad
-                    .map((p, idx) => ({ p, idx }))
-                    .filter(item => !rules.seeds.some(s => (s.type === 'club' && s.ids.includes(item.p.teamId)) || (s.type === 'nation' && s.ids.includes(item.p.nationId)) || (s.type === 'league' && s.ids.includes(item.p.leagueId))))
-                    .sort((a,b) => a.p.rating - b.p.rating)[0]?.idx;
-
-                if (killIdx === undefined) { injectionSuccess = false; break; }
-                currentSquad[killIdx] = replacement;
-                usedIds.add(replacement.id); usedPersonas.add(replacement._personaId);
-                fulfilled++;
+            let success = true;
+            for (const seed of rules.seeds) {
+                let fulfilled = currentSquad.filter(p => (seed.type === 'club' && seed.ids.includes(p.teamId)) || (seed.type === 'nation' && seed.ids.includes(p.nationId)) || (seed.type === 'league' && seed.ids.includes(p.leagueId))).length;
+                while (fulfilled < seed.count) {
+                    const replacement = masterPool.find(p => !usedIds.has(p.id) && !usedPersonas.has(p._personaId) && ((seed.type === 'club' && seed.ids.includes(p.teamId)) || (seed.type === 'nation' && seed.ids.includes(p.nationId)) || (seed.type === 'league' && seed.ids.includes(p.leagueId))));
+                    if (!replacement) { success = false; break; }
+                    const killIdx = currentSquad.findIndex(p => !rules.seeds.some(s => (s.type === 'club' && s.ids.includes(p.teamId)) || (s.type === 'nation' && s.ids.includes(p.nationId)) || (s.type === 'league' && s.ids.includes(p.leagueId))));
+                    if (killIdx === -1) { success = false; break; }
+                    currentSquad[killIdx] = replacement;
+                    usedIds.add(replacement.id); usedPersonas.add(replacement._personaId);
+                    fulfilled++;
+                }
+                if (!success) break;
             }
-            if (!injectionSuccess) break;
-        }
 
-        if (injectionSuccess) {
-            const tempArr = new Array(23).fill(null);
-            activeSlots.forEach((slot, i) => tempArr[slot.index] = currentSquad[i]);
-            squad.setPlayers(tempArr);
-            if (calculateRating(currentSquad) >= rules.targetRating && squad.getChemistry() >= rules.targetChem) {
-                console.log("%c✅ SUCCESS!", "color: #10b981; font-weight: bold;");
+            if (success) {
+                const final = new Array(23).fill(null);
+                activeSlots.forEach((slot, i) => final[slot.index] = currentSquad[i]);
+                squad.setPlayers(final);
                 squad.onDataUpdated.notify();
                 return;
             }
         }
     }
-    console.error("❌ FAILED.");
 })();

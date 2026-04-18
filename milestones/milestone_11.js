@@ -1,9 +1,8 @@
-(async function milestone11MarqueeMatchupSolverV14() {
+(async function milestone11BucketAOverhaulV12() {
     const win = (typeof unsafeWindow !== 'undefined' ? unsafeWindow : window);
     const repo = win.repositories.Item;
 
-    console.log("%c--- 🏆 MILESTONE 11: MARQUEE MATCHUP SOLVER (V14) ---", "font-size: 16px; font-weight: bold; color: #3b82f6;");
-    console.log("[STRATEGY] V14: Professional Grade (Fixed Crash + Full Trace Logging).");
+    console.log("%c--- 🏆 MILESTONE 11: BUCKET-A OVERLAP ENGINE (V12) ---", "font-size: 16px; font-weight: bold; color: #10b981;");
 
     const findSbcContext = (node) => {
         if (!node) return null;
@@ -24,12 +23,11 @@
 
     const normalizePos = (id) => {
         const map = { 2: 3, 8: 7, 4: 5, 6: 5, 9: 10, 11: 10, 13: 14, 15: 14, 17: 18, 19: 18, 20: 21, 22: 21, 24: 25, 26: 25 };
-        return map[id] || id;
+        const rawId = typeof id === 'object' ? id.id : id;
+        return map[rawId] || rawId;
     };
 
-    const activeSlots = squad.getSBCSlots().filter(s => !s.isBrick() && s.index <= 10);
-
-    const calculateSquadRating = (items) => {
+    const calculateRating = (items) => {
         const active = items.filter(p => p !== null);
         if (active.length < 11) return 0;
         const ratings = active.map(p => p.rating);
@@ -39,163 +37,170 @@
         return Math.floor((sum + cf) / 11 + 0.0401);
     };
 
-    // --- PHASE 1: PARSER ---
-    const rules = { rating: 0, chem: 0, gold: 0, rare: 0, maxNations: 11, maxLeagues: 11, maxClubs: 11, mustInclude: [] };
+    const activeSlots = squad.getSBCSlots().filter(s => !s.isBrick() && s.index <= 10);
 
-    (challenge.eligibilityRequirements || []).forEach(r => {
+    // --- STEP 1: PARSER ---
+    const rules = {
+        targetRating: 0, targetChem: 0, minGold: 0, minRare: 0,
+        maxSameClub: 11, maxSameNation: 11, maxSameLeague: 11,
+        maxTotalNations: 11, maxTotalLeagues: 11,
+        seeds: [] 
+    };
+
+    (challenge.eligibilityRequirements || []).forEach((r, idx) => {
         const col = r.kvPairs._collection || r.kvPairs;
         for (let k in col) {
             const key = parseInt(k);
             const val = getCleanValue(col[k]);
-            const vals = Array.isArray(val) ? val : [val];
-
-            if (key === 19) rules.rating = Math.max(rules.rating, vals[0] || r.count || 0);
-            if (key === 35 || key === 20) rules.chem = Math.max(rules.chem, vals[0] || 0);
-            if (key === 17 && vals.includes(3)) rules.gold = r.count;
-            if (key === 25 && (vals.includes(4) || vals === 4)) rules.rare = r.count;
-
-            if (key >= 5 && key <= 15) {
-                const smallVal = vals.find(v => typeof v === 'number' && v > 1 && v <= 8);
-                if (r.count === -1 && smallVal && vals.length === 1) {
-                    if ([5, 9, 15].includes(key)) rules.maxNations = Math.min(rules.maxNations, smallVal);
-                    if ([6, 10, 12].includes(key)) rules.maxLeagues = Math.min(rules.maxLeagues, smallVal);
-                    if ([7, 9, 12].includes(key)) rules.maxClubs = Math.min(rules.maxClubs, smallVal);
-                } else if (vals[0] > 0) {
-                    const type = key === 14 ? 'club' : (key === 15 ? 'nation' : 'league');
-                    rules.mustInclude.push({ key, ids: vals, count: Math.max(1, r.count), type, label: r.requirementLabel });
+            const vals = (Array.isArray(val) ? val : [val]).filter(v => v !== undefined);
+            if (key === 19) rules.targetRating = Math.max(rules.targetRating, vals[0] || 0);
+            if (key === 35 || key === 20) rules.targetChem = Math.max(rules.targetChem, vals[0] || 0);
+            if (key === 17 && vals.includes(3)) rules.minGold = r.count;
+            if (key === 25 && vals.includes(4)) rules.minRare = r.count;
+            if (r.count === -1) {
+                if (r.scope === 1) {
+                    if (key === 5 || key === 7 || key === 9) rules.maxTotalNations = Math.min(rules.maxTotalNations, vals[0]);
+                    if (key === 6 || key === 10 || key === 12) rules.maxTotalLeagues = Math.min(rules.maxTotalLeagues, vals[0]);
+                } else {
+                    if (key === 5 || key === 9) rules.maxSameNation = Math.min(rules.maxSameNation, vals[0]);
+                    if (key === 6 || key === 10) rules.maxSameLeague = Math.min(rules.maxSameLeague, vals[0]);
+                    if (key === 7 || key === 12) rules.maxSameClub = Math.min(rules.maxSameClub, vals[0]);
+                }
+            } else {
+                const validIds = vals.filter(id => id > 0);
+                if (validIds.length > 0) {
+                    const type = (key === 14 || key === 12 || key === 7) ? 'club' : ((key === 15 || key === 5 || key === 9) ? 'nation' : 'league');
+                    rules.seeds.push({ type, ids: validIds, count: r.count });
                 }
             }
         }
     });
 
-    console.log("[REQUIREMENTS] Parsed Map:", rules);
-    console.table(rules.mustInclude);
+    console.log("%c[CHECKLIST] Rule Validation:", "font-weight: bold; color: #10b981;");
+    console.table(rules);
 
-    // --- PHASE 2: INVENTORY ---
-    const fetchItems = (crit) => new Promise(r => {
+    // --- STEP 2: SYNC ---
+    const fetchItems = (lid) => new Promise(r => {
         const criteria = new win.UTSearchCriteriaDTO();
-        Object.assign(criteria, { type: 'player', count: 250, isUntradeable: "true", sortBy: "ovr", sort: "asc" }, crit);
+        Object.assign(criteria, { type: 'player', count: 250, isUntradeable: "true", sortBy: "ovr", sort: "asc" });
+        if (lid) criteria.league = lid;
         win.services.Club.search(criteria).observe({ name: 'f' }, (obs, res) => r(res.response?.items || []));
     });
 
-    log("[SYNC] Performing deep discovery...");
-    const clubSearches = rules.mustInclude.filter(f => f.type === 'club').map(f => fetchItems({ club: f.ids[0] }));
-    const pools = await Promise.all([
-        fetchItems({}), fetchItems({ league: 13 }), fetchItems({ nation: 21 }), ...clubSearches,
-        new Promise(r => win.services.Item.searchStorageItems(new win.UTSearchCriteriaDTO()).observe({name:'s'},(o,res)=>r(res.response?.items || [])))
-    ]);
+    console.log("[SYNC] Mapping inventory...");
+    const disc = [13, 53, 19, 31, 16];
+    const pools = await Promise.all([fetchItems(null), ...disc.map(l => fetchItems(l))]);
     const masterPool = pools.flat().map(p => { p._personaId = Number(p.definitionId) % 16777216; return p; })
-        .filter(p => p.tradable === false && !p.evolutionInfo && p.rareflag <= 1 && p.rating < 85);
+        .filter(p => p.tradable === false && !p.evolutionInfo && p.rareflag <= 1 && p.rating < 89);
 
-    // --- PHASE 3: CHEM ENGINE ---
-    const getStats = (items) => {
-        const active = items.filter(p => p !== null);
-        if (active.length === 0) return { chem: 0, rating: 0, includeOk: false };
-        let totalChem = 0; const nMap = {}, lMap = {}, cMap = {};
-        const inPos = items.map((p, i) => {
-            if (!p) return false;
-            const slotPos = normalizePos(activeSlots[i].position?.id || activeSlots[i]._position);
-            const ok = normalizePos(p.preferredPosition) === slotPos;
-            if (ok) { nMap[p.nationId] = (nMap[p.nationId] || 0) + 1; lMap[p.leagueId] = (lMap[p.leagueId] || 0) + 1; cMap[p.teamId] = (cMap[p.teamId] || 0) + 1; }
-            return ok;
-        });
-        items.forEach((p, i) => {
-            if (!p || !inPos[i]) return;
-            let pc = 0;
-            if (nMap[p.nationId] >= 10) pc = 3; else if (nMap[p.nationId] >= 6) pc = 2; else if (nMap[p.nationId] >= 3) pc = 1;
-            if (lMap[p.leagueId] >= 8) pc += 3; else if (lMap[p.leagueId] >= 5) pc += 2; else if (lMap[p.leagueId] >= 3) pc += 1;
-            if (cMap[p.teamId] >= 7) pc += 3; else if (cMap[p.teamId] >= 4) pc += 2; else if (cMap[p.teamId] >= 2) pc += 1;
-            totalChem += Math.min(3, pc);
-        });
-        const includeOk = rules.mustInclude.every(f => active.filter(p => f.ids.includes(p[f.type + 'Id'])).length >= f.count);
-        return { chem: totalChem, rating: calculateSquadRating(items), includeOk, nations: new Set(active.map(p => p.nationId)).size, clubs: new Set(active.map(p => p.teamId)).size, rare: active.filter(p => p.rareflag === 1).length, gold: active.filter(p => p.rating >= 75).length };
-    };
+    // --- STEP 3: OVERLAP DISCOVERY (The Power Core) ---
+    const overlaps = {};
+    masterPool.forEach(p => {
+        const key = `${p.leagueId}-${p.nationId}`;
+        if (!overlaps[key]) overlaps[key] = { lid: p.leagueId, nid: p.nationId, count: 0, golds: 0 };
+        overlaps[key].count++;
+        if (p.rating >= 75) overlaps[key].golds++;
+    });
 
-    // --- PHASE 4: ANCHOR SELECTION ---
-    const getIntersectionScore = (p) => {
-        return rules.mustInclude.filter(m => m.ids.includes(p.teamId) || m.ids.includes(p.nationId)).length;
-    };
-
-    const anchors = masterPool
-        .filter(p => p.rating <= 82 && getIntersectionScore(p) > 0)
-        .sort((a,b) => getIntersectionScore(b) - getIntersectionScore(a))
+    const trialOverlaps = Object.values(overlaps)
+        .sort((a,b) => b.count - a.count)
         .slice(0, 15);
+    
+    console.log("[EVAL] Discovered Power Overlaps (League-Nation):", trialOverlaps.slice(0, 5));
 
-    log(`[HEURISTIC] Anchoring ${anchors.length} High-Intersection Trials.`);
-
-    // --- PHASE 5: RECURSIVE BACKTRACKER ---
-    const traceGrowth = (anchor) => {
+    // --- STEP 4: SOLVER ---
+    const runTrial = (overlap) => {
         const selected = new Array(11).fill(null);
-        selected[0] = anchor;
-        const usedIds = new Set([anchor.id]); const usedPersonaIds = new Set([anchor._personaId]);
-        let iterations = 0; let bestFail = null;
+        const usedIds = new Set(); const usedPersonaIds = new Set();
+        const state = { gold: 0, rare: 0, nations: new Map(), leagues: new Map(), counts: { club: {} }, seeds: rules.seeds.map(s => ({ ...s, current: 0 })) };
+        let iterations = 0;
+
+        const updateState = (p, add) => {
+            const mod = add ? 1 : -1;
+            if (p.rating >= 75) state.gold += mod;
+            if (p.rareflag === 1) state.rare += mod;
+            state.counts.club[p.teamId] = (state.counts.club[p.teamId] || 0) + mod;
+            if (add) {
+                state.nations.set(p.nationId, (state.nations.get(p.nationId) || 0) + 1);
+                state.leagues.set(p.leagueId, (state.leagues.get(p.leagueId) || 0) + 1);
+            } else {
+                const nC = state.nations.get(p.nationId) - 1;
+                if (nC <= 0) state.nations.delete(p.nationId); else state.nations.set(p.nationId, nC);
+                const lC = state.leagues.get(p.leagueId) - 1;
+                if (lC <= 0) state.leagues.delete(p.leagueId); else state.leagues.set(p.leagueId, lC);
+            }
+        };
+
+        const isValid = (p, slotIdx) => {
+            if (usedIds.has(p.id) || usedPersonaIds.has(p._personaId)) return false;
+            if ((state.counts.club[p.teamId] || 0) >= rules.maxSameClub) return false;
+            if ((state.nations.get(p.nationId) || 0) >= rules.maxSameNation) return false;
+            if ((state.leagues.get(p.leagueId) || 0) >= rules.maxSameLeague) return false;
+            if (!state.nations.has(p.nationId) && state.nations.size >= rules.maxTotalNations) return false;
+            if (!state.leagues.has(p.leagueId) && state.leagues.size >= rules.maxTotalLeagues) return false;
+            
+            const left = 11 - slotIdx - 1;
+            if (state.gold < rules.minGold && (rules.minGold - state.gold) > (left + (p.rating >= 75 ? 1 : 0))) return false;
+            if (state.rare < rules.minRare && (rules.minRare - state.rare) > (left + (p.rareflag === 1 ? 1 : 0))) return false;
+            return true;
+        };
 
         const solve = (idx) => {
-            iterations++; if (iterations > 60000) return false;
+            iterations++; if (iterations > 6000) return false;
             if (idx === 11) {
-                const s = getStats(selected);
-                const valid = s.chem >= rules.chem && s.rating >= rules.rating && s.includeOk && s.nations <= rules.maxNations && s.clubs <= rules.maxClubs && s.rare >= rules.rare;
-                if (!bestFail || s.chem > bestFail.chem) bestFail = { squad: [...selected], stats: s };
-                return valid;
+                const tempPlayers = new Array(23).fill(null);
+                activeSlots.forEach((slot, i) => tempPlayers[slot.index] = selected[i]);
+                squad.setPlayers(tempPlayers);
+                return calculateRating(selected) >= rules.targetRating && squad.getChemistry() >= rules.targetChem;
             }
 
-            const currentSum = selected.filter(x => x).reduce((acc, p) => acc + p.rating, 0);
-            const left = 11 - idx;
-            if ((currentSum + (left * 82)) < (rules.rating * 11)) return false;
-
             const slotPos = normalizePos(activeSlots[idx].position?.id || activeSlots[idx]._position);
-            const missing = rules.mustInclude.filter(f => selected.filter(p => p && (f.ids.includes(p.teamId) || f.ids.includes(p.nationId))).length < f.count);
-            const curClubs = new Set(selected.filter(x => x).map(x => x.teamId));
-
-            const candidates = masterPool.filter(p => {
-                if (usedIds.has(p.id) || usedPersonaIds.has(p._personaId)) return false;
-                const nations = new Set(selected.filter(x => x).map(x => x.nationId));
-                if (!nations.has(p.nationId) && nations.size >= rules.maxNations) return false;
-                const clubs = new Set(selected.filter(x => x).map(x => x.teamId));
-                if (!clubs.has(p.teamId) && clubs.size >= rules.maxClubs) return false;
-                return true;
-            }).sort((pA, pB) => {
-                const aHits = missing.some(m => m.ids.includes(pA.teamId) || m.ids.includes(pA.nationId));
-                const bHits = missing.some(m => m.ids.includes(pB.teamId) || m.ids.includes(pB.nationId));
-                if (aHits !== bHits) return aHits ? -1 : 1;
-                const aIn = curClubs.has(pA.teamId); const bIn = curClubs.has(pB.teamId);
-                if (aIn !== bIn) return aIn ? -1 : 1;
-                return pB.rating - pA.rating;
-            }).slice(0, 20);
+            const candidates = masterPool.filter(p => isValid(p, idx))
+                .map(p => {
+                    let score = 0;
+                    // BUCKET A CORE PRIORITY
+                    if (p.leagueId === overlap.lid && p.nationId === overlap.nid) score += 10000;
+                    else if (p.nationId === overlap.nid) score += 5000; // Prefer same nation if league full
+                    
+                    if (normalizePos(p.preferredPosition) === slotPos) score += 500;
+                    return { p, score };
+                })
+                .sort((a,b) => b.score - a.score || (a.p.rating - b.p.rating))
+                .slice(0, 15).map(c => c.p);
 
             for (const p of candidates) {
                 selected[idx] = p; usedIds.add(p.id); usedPersonaIds.add(p._personaId);
-                console.log(`[GROW] Trial ${anchor._staticData?.name}: Depth ${idx+1}/11. Added ${p._staticData?.name} (${p.rating})`);
+                updateState(p, true);
                 if (solve(idx + 1)) return true;
+                updateState(p, false);
                 selected[idx] = null; usedIds.delete(p.id); usedPersonaIds.delete(p._personaId);
             }
             return false;
         };
 
-        if (solve(1)) return { squad: selected, ...getStats(selected) };
-        console.log(`[REJECT] Trial ${anchor._staticData?.name} failed. Best attempt had ${bestFail.stats.chem}/${rules.chem} Chem, ${bestFail.stats.rating}/${rules.rating} OVR, ${bestFail.stats.clubs}/${rules.maxClubs} Clubs.`);
-        console.log("BEST ATTEMPT:", bestFail.squad.map(p => `${p._staticData?.name} (R:${p.rating} C:${p.teamId} N:${p.nationId})`));
-        return null;
+        return solve(0) ? { squad: [...selected] } : null;
     };
 
-    // --- PHASE 6: EXECUTION ---
     let best = null;
-    for (const anchor of anchors) {
-        const res = traceGrowth(anchor);
-        if (res && (!best || res.rating < best.rating)) best = res;
+    for (const ov of trialOverlaps) {
+        console.log(`[TRIAL] Testing Overlap L:${ov.lid} N:${ov.nid} (Available: ${ov.count})`);
+        const res = runTrial(ov);
+        if (res) {
+            const tempPlayers = new Array(23).fill(null);
+            activeSlots.forEach((slot, i) => tempPlayers[slot.index] = res.squad[i]);
+            squad.setPlayers(tempPlayers);
+            const chem = squad.getChemistry();
+            if (!best || chem > best.chem) { best = { squad: res.squad, chem, ov }; if (chem >= 33) break; }
+        }
     }
 
     if (best) {
-        log(`[DECISION] Victory! Built around ${best.squad[0]._staticData?.name}.`);
+        console.log(`%c[WINNER] Success via L:${best.ov.lid} N:${best.ov.nid}!`, "color: #10b981; font-weight: bold;");
         const finalArray = new Array(23).fill(null);
-        best.squad.forEach((p, i) => { if (p) finalArray[activeSlots[i].index] = p; });
+        best.squad.forEach((p, i) => finalArray[activeSlots[i].index] = p);
         squad.setPlayers(finalArray);
         squad.onDataUpdated.notify();
         if (controller._pushSquadToView) controller._pushSquadToView(squad);
-        win.services.SBC.saveChallenge(challenge).observe({name:'S'},(o,res)=>log("✅ SERVER SYNCED."));
-    } else {
-        log("❌ NO SOLUTION FOUND. Every path from the seeds hit a hard limit.");
-    }
-
-    function log(m) { console.log(`[FC-SBC] ${m}`); }
+        win.services.SBC.saveChallenge(challenge).observe({name:'S'},(o,res)=>console.log("✅ SERVER SYNCED."));
+    } else { console.error("❌ NO SOLUTION FOUND."); }
 })();

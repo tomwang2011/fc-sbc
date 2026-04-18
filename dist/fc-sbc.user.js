@@ -916,47 +916,47 @@
       if (!ctx) return log("❌ SBC Screen Not Found");
       const { challenge, squad, controller } = ctx;
       log("Analyzing Complex Constraints...");
-      const constraints = {
+      const rules = {
+        targetRating: 0,
+        targetChem: 0,
+        minGold: 0,
+        minRare: 0,
         maxSameClub: 11,
         maxSameNation: 11,
         maxSameLeague: 11,
         maxTotalNations: 11,
         maxTotalLeagues: 11,
-        minGold: 0,
-        minRare: 0,
-        targetRating: 0,
-        targetChem: 0
+        seeds: []
       };
-      const hardReqs = [];
       (challenge.eligibilityRequirements || []).forEach((r2) => {
         const col = r2.kvPairs._collection || r2.kvPairs;
         for (let k2 in col) {
           const key = parseInt(k2);
           const val = Utils.getCleanValue(col[k2]);
-          const vals = Array.isArray(val) ? val : [val];
-          if (key === 19) constraints.targetRating = Math.max(constraints.targetRating, r2.count || vals[0] || 0);
-          if (key === 35 || key === 20) constraints.targetChem = Math.max(constraints.targetChem, vals[0] || 0);
-          if (key === 17 && vals.includes(3)) constraints.minGold = r2.count;
-          if (key === 25 && vals.includes(4)) constraints.minRare = r2.count;
-          if (key === 5) {
-            if (r2.scope === 1) constraints.maxSameNation = vals[0];
-            else constraints.maxTotalNations = vals[0];
+          const vals = (Array.isArray(val) ? val : [val]).filter((v2) => v2 !== void 0);
+          if (key === 19) rules.targetRating = Math.max(rules.targetRating, vals[0] || 0);
+          if (key === 35 || key === 20) rules.targetChem = Math.max(rules.targetChem, vals[0] || 0);
+          if (key === 17 && vals.includes(3)) rules.minGold = r2.count;
+          if (key === 25 && vals.includes(4)) rules.minRare = r2.count;
+          if (r2.count === -1) {
+            if (r2.scope === 1) {
+              if (key === 5 || key === 7 || key === 9) rules.maxTotalNations = Math.min(rules.maxTotalNations, vals[0]);
+              if (key === 6 || key === 10 || key === 12) rules.maxTotalLeagues = Math.min(rules.maxTotalLeagues, vals[0]);
+            } else {
+              if (key === 5 || key === 9) rules.maxSameNation = Math.min(rules.maxSameNation, vals[0]);
+              if (key === 6 || key === 10) rules.maxSameLeague = Math.min(rules.maxSameLeague, vals[0]);
+              if (key === 7 || key === 12) rules.maxSameClub = Math.min(rules.maxSameClub, vals[0]);
+            }
+          } else {
+            const validIds = vals.filter((id) => id > 0);
+            if (validIds.length > 0) {
+              const type = key === 14 || key === 12 || key === 7 ? "club" : key === 15 || key === 5 || key === 9 ? "nation" : "league";
+              rules.seeds.push({ type, ids: validIds, count: r2.count });
+            }
           }
-          if (key === 6) {
-            if (r2.scope === 1) constraints.maxSameLeague = vals[0];
-            else constraints.maxTotalLeagues = vals[0];
-          }
-          if (key === 7) {
-            constraints.maxSameClub = vals[0];
-          }
-          if (key === 9 && vals[0] === -1) constraints.maxTotalNations = r2.count;
-          if (key === 10 && vals[0] === -1) constraints.maxTotalLeagues = r2.count;
-          if (key === 14) vals.forEach((id) => hardReqs.push({ type: "club", id, count: r2.count || 1 }));
-          if (key === 15 && vals[0] > 0) vals.forEach((id) => hardReqs.push({ type: "nation", id, count: r2.count || 1 }));
-          if (key === 11 && vals[0] > 10) vals.forEach((id) => hardReqs.push({ type: "league", id, count: r2.count || 1 }));
         }
       });
-      log(`Targets: ${constraints.targetChem} Chem | Nations: ${constraints.maxTotalNations} (MaxSame: ${constraints.maxSameNation})`);
+      log(`Targets: ${rules.targetChem} Chem | Nations: ${rules.maxTotalNations} Max Total`);
       log("Performing Multi-Pass Sync...");
       await Promise.all([
         Inventory.fetchItems({ count: 250 }),
@@ -968,138 +968,126 @@
       ]);
       await Inventory.primeInventory();
       const pool = Inventory.memory.filter(
-        (p2) => p2.tradable === false && !p2.evolutionInfo && p2.rareflag <= 1 && p2.rating < 85
+        (p2) => p2.tradable === false && !p2.evolutionInfo && p2.rareflag <= 1 && p2.rating < 89
       );
       const activeSlots = squad.getSBCSlots().filter((s2) => !s2.isBrick() && s2.index <= 10);
-      const getStats = (items) => {
+      const overlaps = {};
+      pool.forEach((p2) => {
+        const key = `${p2.leagueId}-${p2.nationId}`;
+        if (!overlaps[key]) overlaps[key] = { lid: p2.leagueId, nid: p2.nationId, count: 0 };
+        overlaps[key].count++;
+      });
+      const trialOverlaps = Object.values(overlaps).sort((a2, b2) => b2.count - a2.count).slice(0, 15);
+      const calculateRating = (items) => {
         const active = items.filter((p2) => p2 !== null);
-        if (active.length === 0) return { chem: 0, rating: 0, nations: 0, rare: 0, gold: 0 };
-        const tempPlayers = new Array(23).fill(null);
-        activeSlots.forEach((slot, i2) => {
-          if (items[i2]) tempPlayers[slot.index] = items[i2];
+        if (active.length < 11) return 0;
+        const ratings = active.map((p2) => p2.rating);
+        const sum = ratings.reduce((a2, b2) => a2 + b2, 0);
+        const avg = sum / 11;
+        let cf = 0;
+        ratings.forEach((r2) => {
+          if (r2 > avg) cf += r2 - avg;
         });
-        squad.setPlayers(tempPlayers);
-        return {
-          chem: squad.getChemistry(),
-          rating: Utils.calculateRating(items),
-          nations: new Set(active.map((p2) => p2.nationId)).size,
-          gold: active.filter((p2) => p2.rating >= 75).length,
-          rare: active.filter((p2) => p2.rareflag === 1).length
-        };
+        return Math.floor((sum + cf) / 11 + 0.0401);
       };
-      const runTrial = (lid, nid) => {
+      const runTrial = (ov) => {
         const selected = new Array(11).fill(null);
         const usedIds = new Set();
         const usedPersonaIds = new Set();
-        const counts = { club: {}, nation: {}, league: {}, gold: 0, rare: 0 };
-        const fulfilled = { club: {}, nation: {}, league: {} };
+        const counts = { nation: new Map(), league: new Map(), club: {} };
+        const fulfilled = new Array(rules.seeds.length).fill(0);
         let iterations = 0;
+        const updateState = (p2, add) => {
+          const mod = add ? 1 : -1;
+          counts.club[p2.teamId] = (counts.club[p2.teamId] || 0) + mod;
+          rules.seeds.forEach((s2, i2) => {
+            const match = s2.type === "club" && s2.ids.includes(p2.teamId) || s2.type === "nation" && s2.ids.includes(p2.nationId) || s2.type === "league" && s2.ids.includes(p2.leagueId);
+            if (match) fulfilled[i2] += mod;
+          });
+          if (add) {
+            counts.nation.set(p2.nationId, (counts.nation.get(p2.nationId) || 0) + 1);
+            counts.league.set(p2.leagueId, (counts.league.get(p2.leagueId) || 0) + 1);
+          } else {
+            const nC = counts.nation.get(p2.nationId) - 1;
+            if (nC <= 0) counts.nation.delete(p2.nationId);
+            else counts.nation.set(p2.nationId, nC);
+            const lC = counts.league.get(p2.leagueId) - 1;
+            if (lC <= 0) counts.league.delete(p2.leagueId);
+            else counts.league.set(p2.leagueId, lC);
+          }
+        };
         const isValid = (p2, slotIdx) => {
           if (usedIds.has(p2.id) || usedPersonaIds.has(p2._personaId)) return false;
-          const currentNations = new Set(selected.filter((x2) => x2).map((x2) => x2.nationId));
-          const currentLeagues = new Set(selected.filter((x2) => x2).map((x2) => x2.leagueId));
-          if (!currentNations.has(p2.nationId) && currentNations.size >= constraints.maxTotalNations) return false;
-          if (!currentLeagues.has(p2.leagueId) && currentLeagues.size >= constraints.maxTotalLeagues) return false;
-          if ((counts.club[p2.teamId] || 0) >= constraints.maxSameClub) return false;
-          if ((counts.nation[p2.nationId] || 0) >= constraints.maxSameNation) return false;
-          if ((counts.league[p2.leagueId] || 0) >= (p2.leagueId === lid ? 11 : constraints.maxSameLeague)) return false;
-          const slotsLeft = 11 - slotIdx - 1;
-          for (const req of hardReqs) {
-            const current = fulfilled[req.type][req.id] || 0;
-            const needed = req.count - current;
-            if (needed > slotsLeft + 1) return false;
+          if ((counts.club[p2.teamId] || 0) >= rules.maxSameClub) return false;
+          if ((counts.nation.get(p2.nationId) || 0) >= rules.maxSameNation) return false;
+          if ((counts.league.get(p2.leagueId) || 0) >= rules.maxSameLeague) return false;
+          if (!counts.nation.has(p2.nationId) && counts.nation.size >= rules.maxTotalNations) return false;
+          if (!counts.league.has(p2.leagueId) && counts.league.size >= rules.maxTotalLeagues) return false;
+          const left = 11 - slotIdx - 1;
+          for (let i2 = 0; i2 < rules.seeds.length; i2++) {
+            if (rules.seeds[i2].count - fulfilled[i2] > left + 1) return false;
           }
-          if (counts.gold < constraints.minGold && constraints.minGold - counts.gold > slotsLeft + (p2.rating >= 75 ? 1 : 0)) return false;
-          if (counts.rare < constraints.minRare && constraints.minRare - counts.rare > slotsLeft + (p2.rareflag === 1 ? 1 : 0)) return false;
           return true;
         };
         const solve = (idx) => {
           iterations++;
-          if (iterations > 3e3) return false;
-          if (idx === 11) return true;
+          if (iterations > 5e3) return false;
+          if (idx === 11) {
+            const tempArr = new Array(23).fill(null);
+            activeSlots.forEach((slot, i2) => tempArr[slot.index] = selected[i2]);
+            squad.setPlayers(tempArr);
+            return calculateRating(selected) >= rules.targetRating && squad.getChemistry() >= rules.targetChem;
+          }
           const slotPos = Utils.normalizePos(activeSlots[idx].position?.id || activeSlots[idx]._position);
           const candidates = pool.filter((p2) => isValid(p2, idx)).map((p2) => {
             let score = 0;
-            hardReqs.forEach((req) => {
-              const current = fulfilled[req.type][req.id] || 0;
-              if (current < req.count) {
-                if (req.type === "club" && p2.teamId === req.id) score += 2e3;
-                if (req.type === "nation" && p2.nationId === req.id) score += 1e3;
-                if (req.type === "league" && p2.leagueId === req.id) score += 500;
-              }
+            rules.seeds.forEach((s2, si) => {
+              if (fulfilled[si] < s2.count && (s2.type === "club" && s2.ids.includes(p2.teamId) || s2.type === "nation" && s2.ids.includes(p2.nationId) || s2.type === "league" && s2.ids.includes(p2.leagueId))) score += 1e4;
             });
-            if (p2.leagueId === lid || p2.nationId === nid) score += 50;
-            if (Utils.normalizePos(p2.preferredPosition) === slotPos) score += 100;
+            if (p2.leagueId === ov.lid && p2.nationId === ov.nid) score += 5e3;
+            else if (p2.nationId === ov.nid) score += 1e3;
+            if (Utils.normalizePos(p2.preferredPosition) === slotPos) score += 500;
             return { p: p2, score };
-          }).sort((a2, b2) => b2.score - a2.score || a2.p.rating - b2.p.rating).slice(0, 10).map((c2) => c2.p);
+          }).sort((a2, b2) => b2.score - a2.score || a2.p.rating - b2.p.rating).slice(0, 15).map((c2) => c2.p);
           for (const p2 of candidates) {
             selected[idx] = p2;
             usedIds.add(p2.id);
             usedPersonaIds.add(p2._personaId);
-            counts.club[p2.teamId] = (counts.club[p2.teamId] || 0) + 1;
-            counts.nation[p2.nationId] = (counts.nation[p2.nationId] || 0) + 1;
-            counts.league[p2.leagueId] = (counts.league[p2.leagueId] || 0) + 1;
-            if (p2.rating >= 75) counts.gold++;
-            if (p2.rareflag === 1) counts.rare++;
-            hardReqs.forEach((req) => {
-              if (req.type === "club" && p2.teamId === req.id) fulfilled.club[req.id] = (fulfilled.club[req.id] || 0) + 1;
-              if (req.type === "nation" && p2.nationId === req.id) fulfilled.nation[req.id] = (fulfilled.nation[req.id] || 0) + 1;
-              if (req.type === "league" && p2.leagueId === req.id) fulfilled.league[req.id] = (fulfilled.league[req.id] || 0) + 1;
-            });
+            updateState(p2, true);
             if (solve(idx + 1)) return true;
+            updateState(p2, false);
             selected[idx] = null;
             usedIds.delete(p2.id);
             usedPersonaIds.delete(p2._personaId);
-            counts.club[p2.teamId]--;
-            counts.nation[p2.nationId]--;
-            counts.league[p2.leagueId]--;
-            if (p2.rating >= 75) counts.gold--;
-            if (p2.rareflag === 1) counts.rare--;
-            hardReqs.forEach((req) => {
-              if (req.type === "club" && p2.teamId === req.id) fulfilled.club[req.id]--;
-              if (req.type === "nation" && p2.nationId === req.id) fulfilled.nation[req.id]--;
-              if (req.type === "league" && p2.leagueId === req.id) fulfilled.league[req.id]--;
-            });
           }
           return false;
         };
-        return solve(0) ? { squad: selected, lid, nid } : null;
+        return solve(0) ? { squad: [...selected] } : null;
       };
-      const lCounts = {};
-      pool.forEach((p2) => lCounts[p2.leagueId] = (lCounts[p2.leagueId] || 0) + 1);
-      const topLeagues = Object.entries(lCounts).sort((a2, b2) => b2[1] - a2[1]).slice(0, 8).map((x2) => parseInt(x2[0]));
       let best = null;
-      for (const lid of topLeagues) {
-        const res = runTrial(lid, 0);
-        if (!res) continue;
-        const stats = getStats(res.squad);
-        const valid = stats.chem >= constraints.targetChem && stats.rating >= constraints.targetRating && stats.gold >= constraints.minGold && stats.rare >= constraints.minRare && stats.nations <= constraints.maxTotalNations;
-        if (valid && (!best || stats.chem > best.chem)) best = { ...res, ...stats };
-        if (best && best.chem >= 33) break;
-      }
-      if (best) {
-        log(`✅ CSP Success: ${best.chem} Chem | ${best.rating} Rating`);
-        for (let i2 = 0; i2 < 11; i2++) {
-          for (let j2 = i2 + 1; j2 < 11; j2++) {
-            const temp = [...best.squad];
-            [temp[i2], temp[j2]] = [temp[j2], temp[i2]];
-            const newChem = getStats(temp).chem;
-            if (newChem > best.chem) {
-              best.squad = temp;
-              best.chem = newChem;
-              console.log(`[SHUFFLE] Improved chem to ${newChem}`);
-            }
+      for (const ov of trialOverlaps) {
+        const res = runTrial(ov);
+        if (res) {
+          const tempArr = new Array(23).fill(null);
+          activeSlots.forEach((slot, i2) => tempArr[slot.index] = res.squad[i2]);
+          squad.setPlayers(tempArr);
+          const chem = squad.getChemistry();
+          if (!best || chem > best.chem) {
+            best = { squad: res.squad, chem };
+            if (chem >= 33) break;
           }
         }
+      }
+      if (best) {
         const final = new Array(23).fill(null);
         best.squad.forEach((p2, i2) => {
           if (p2) final[activeSlots[i2].index] = p2;
         });
         squad.setPlayers(final);
         await Utils.saveSquad(challenge, squad, controller);
-        log("✅ Challenge Solved.");
+        log(`✅ Challenge Solved: ${best.chem} Chem`);
       } else {
-        log("❌ CSP Engine failed to find valid solution.");
+        log("❌ Failed to find structural solution.");
       }
     }
   }
