@@ -111,7 +111,7 @@ export function App() {
             className="animate-in slide-in-from-left-4 fade-in duration-300"
         >
           <div className="flex justify-between items-center mb-6">
-            <h2 className="text-xs font-black text-white tracking-widest uppercase opacity-60">SBC Master V1.0.18</h2>
+            <h2 className="text-xs font-black text-white tracking-widest uppercase opacity-60">SBC Master V1.0.19</h2>
             <button 
               onClick={handleScan}
               disabled={isScanning}

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC SBC Enhanced Builder
 // @namespace    fc-sbc-builder
-// @version      1.0.18
+// @version      1.0.19
 // @author       tomwang
 // @description  Optimal SBC builder with Storage-First priority
 // @license      ISC
@@ -728,7 +728,15 @@
       const usedIds = new Set();
       const activeSlots = squad.getSBCSlots().filter((s2) => !s2.isBrick() && s2.index <= 10);
       const selected = new Array(activeSlots.length).fill(null);
-      let anchor = isTotwRequired ? pool.find((p2) => p2.rarityId === 3 || p2.rareflag === 3) : pool.find((p2) => p2.rating >= 87 && p2.rating <= 88 && p2.rareflag === 1);
+      let anchorRating = 87;
+      if (targetRating === 83) anchorRating = 83;
+      else if (targetRating === 84) anchorRating = 84;
+      else if (targetRating >= 85) anchorRating = 87;
+      if (targetRating >= 86) anchorRating = 88;
+      let anchor = isTotwRequired ? pool.find((p2) => p2.rarityId === 3 || p2.rareflag === 3) : pool.find((p2) => p2.rating === anchorRating && p2.rareflag === 1);
+      if (!anchor && !isTotwRequired && anchorRating > 83) {
+        anchor = pool.find((p2) => p2.rating >= anchorRating && p2.rating <= 88 && p2.rareflag === 1);
+      }
       if (anchor) {
         console.log(`[DECISION] Anchor: ${anchor._staticData?.name} (${anchor.rating}) [Source: ${anchor._sourceType}]`);
         selected[0] = anchor;
@@ -741,7 +749,14 @@
       pool.forEach((p2) => {
         if (p2._sourceType === "storage" && (p2.rating === 83 || p2.rating === 84)) clogs[p2.rating]++;
       });
-      let pattern = anchor && anchor.rating >= 88 ? [{ r: 83, c: 10 }] : clogs[84] >= 6 ? [{ r: 84, c: 6 }, { r: 83, c: 4 }] : [{ r: 87, c: 1 }, { r: 83, c: 9 }];
+      let pattern = [];
+      if (targetRating === 83) {
+        pattern = [{ r: 83, c: 10 }];
+      } else if (targetRating === 84) {
+        pattern = [{ r: 84, c: 10 }];
+      } else {
+        pattern = anchor && anchor.rating >= 88 ? [{ r: 83, c: 10 }] : clogs[84] >= 6 ? [{ r: 84, c: 6 }, { r: 83, c: 4 }] : [{ r: 87, c: 1 }, { r: 83, c: 9 }];
+      }
       pattern.forEach((pReq) => {
         let count = 0;
         pool.filter((p2) => p2.rating === pReq.r && p2.rareflag <= 1).forEach((p2) => {
@@ -1168,7 +1183,7 @@ u$1(
               className: "animate-in slide-in-from-left-4 fade-in duration-300",
               children: [
 u$1("div", { className: "flex justify-between items-center mb-6", children: [
-u$1("h2", { className: "text-xs font-black text-white tracking-widest uppercase opacity-60", children: "SBC Master V1.0.18" }),
+u$1("h2", { className: "text-xs font-black text-white tracking-widest uppercase opacity-60", children: "SBC Master V1.0.19" }),
 u$1(
                     "button",
                     {

@@ -37,7 +37,18 @@ export class DeCloggerSolver {
     const selected: (EAItem | null)[] = new Array(activeSlots.length).fill(null);
 
     // 1. Mandatory Anchor
-    let anchor = isTotwRequired ? pool.find(p => p.rarityId === 3 || p.rareflag === 3) : pool.find(p => p.rating >= 87 && p.rating <= 88 && p.rareflag === 1);
+    let anchorRating = 87;
+    if (targetRating === 83) anchorRating = 83;
+    else if (targetRating === 84) anchorRating = 84;
+    else if (targetRating >= 85) anchorRating = 87;
+    if (targetRating >= 86) anchorRating = 88;
+
+    let anchor = isTotwRequired ? pool.find(p => p.rarityId === 3 || p.rareflag === 3) : pool.find(p => p.rating === anchorRating && p.rareflag === 1);
+    if (!anchor && !isTotwRequired && anchorRating > 83) {
+        // Fallback for anchor if exact rating not found
+        anchor = pool.find(p => p.rating >= anchorRating && p.rating <= 88 && p.rareflag === 1);
+    }
+
     if (anchor) {
         console.log(`[DECISION] Anchor: ${anchor._staticData?.name} (${anchor.rating}) [Source: ${anchor._sourceType}]`);
         selected[0] = anchor; usedIds.add(anchor.id); usedPersonaIds.add(anchor._personaId!);
@@ -48,7 +59,15 @@ export class DeCloggerSolver {
     // 2. Pattern Fill
     const clogs = { 83: 0, 84: 0 };
     pool.forEach(p => { if (p._sourceType === 'storage' && (p.rating === 83 || p.rating === 84)) (clogs as any)[p.rating]++; });
-    let pattern = (anchor && anchor.rating >= 88) ? [{ r: 83, c: 10 }] : (clogs[84] >= 6 ? [{ r: 84, c: 6 }, { r: 83, c: 4 }] : [{ r: 87, c: 1 }, { r: 83, c: 9 }]);
+    
+    let pattern: { r: number, c: number }[] = [];
+    if (targetRating === 83) {
+        pattern = [{ r: 83, c: 10 }];
+    } else if (targetRating === 84) {
+        pattern = [{ r: 84, c: 10 }];
+    } else {
+        pattern = (anchor && anchor.rating >= 88) ? [{ r: 83, c: 10 }] : (clogs[84] >= 6 ? [{ r: 84, c: 6 }, { r: 83, c: 4 }] : [{ r: 87, c: 1 }, { r: 83, c: 9 }]);
+    }
 
     pattern.forEach(pReq => {
         let count = 0;
