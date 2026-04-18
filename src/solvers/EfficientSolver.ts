@@ -36,7 +36,7 @@ export class EfficientSolver {
     });
 
     if (buckets.length === 0 && !globalLevel) globalLevel = { level: "gold", min: 75, max: 82 };
-    if (Inventory.memory.length === 0) await Inventory.primeInventory(Array.from(levelsToDiscover));
+    await Inventory.primeInventory(Array.from(levelsToDiscover));
 
     const pool = Inventory.memory.filter(p => {
         if (settings.untradOnly && p.tradable === true) return false;

@@ -45,8 +45,13 @@ export function App() {
         challenge: SbcBuilder.solveChallenge.bind(SbcBuilder)
       };
       await solverMap[type]((msg: string) => setStatus(msg), { untradOnly, excludedLeagues });
-      const res = await SbcBuilder.primeInventory();
-      setStats({ total: res.total, sbcStorage: res.storage, unassigned: res.unassigned });
+      const items = SbcBuilder.getMemory();
+      const stats = {
+        total: items.length,
+        storage: items.filter(p => p._sourceType === 'storage').length,
+        unassigned: items.filter(p => p._sourceType === 'unassigned').length
+      };
+      setStats({ total: stats.total, sbcStorage: stats.storage, unassigned: stats.unassigned });
     } catch (e: any) {
       setStatus(`❌ Error: ${e.message}`);
     } finally {
@@ -111,7 +116,7 @@ export function App() {
             className="animate-in slide-in-from-left-4 fade-in duration-300"
         >
           <div className="flex justify-between items-center mb-6">
-            <h2 className="text-xs font-black text-white tracking-widest uppercase opacity-60">SBC Master V1.0.19</h2>
+            <h2 className="text-xs font-black text-white tracking-widest uppercase opacity-60">SBC Master V1.0.20</h2>
             <button 
               onClick={handleScan}
               disabled={isScanning}

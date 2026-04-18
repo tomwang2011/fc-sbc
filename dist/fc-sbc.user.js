@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC SBC Enhanced Builder
 // @namespace    fc-sbc-builder
-// @version      1.0.19
+// @version      1.0.20
 // @author       tomwang
 // @description  Optimal SBC builder with Storage-First priority
 // @license      ISC
@@ -842,7 +842,7 @@
         }
       });
       if (buckets.length === 0 && !globalLevel) globalLevel = { level: "gold", min: 75, max: 82 };
-      if (Inventory.memory.length === 0) await Inventory.primeInventory(Array.from(levelsToDiscover));
+      await Inventory.primeInventory(Array.from(levelsToDiscover));
       const pool = Inventory.memory.filter((p2) => {
         if (settings.untradOnly && p2.tradable === true) return false;
         if (settings.excludedLeagues.includes(p2.leagueId)) return false;
@@ -1057,6 +1057,9 @@ Inventory.fetchItems({ league: 19, count: 50 })
     static async primeInventory(targetLevels = []) {
       return await Inventory.primeInventory(targetLevels);
     }
+    static getMemory() {
+      return Inventory.memory;
+    }
     static async solveLeague(log, settings) {
       await LeagueSolver.solve(log, settings);
     }
@@ -1116,8 +1119,13 @@ Inventory.fetchItems({ league: 19, count: 50 })
           challenge: SbcBuilder.solveChallenge.bind(SbcBuilder)
         };
         await solverMap[type]((msg) => setStatus(msg), { untradOnly, excludedLeagues });
-        const res = await SbcBuilder.primeInventory();
-        setStats({ total: res.total, sbcStorage: res.storage, unassigned: res.unassigned });
+        const items = SbcBuilder.getMemory();
+        const stats2 = {
+          total: items.length,
+          storage: items.filter((p2) => p2._sourceType === "storage").length,
+          unassigned: items.filter((p2) => p2._sourceType === "unassigned").length
+        };
+        setStats({ total: stats2.total, sbcStorage: stats2.storage, unassigned: stats2.unassigned });
       } catch (e2) {
         setStatus(`❌ Error: ${e2.message}`);
       } finally {
@@ -1183,7 +1191,7 @@ u$1(
               className: "animate-in slide-in-from-left-4 fade-in duration-300",
               children: [
 u$1("div", { className: "flex justify-between items-center mb-6", children: [
-u$1("h2", { className: "text-xs font-black text-white tracking-widest uppercase opacity-60", children: "SBC Master V1.0.19" }),
+u$1("h2", { className: "text-xs font-black text-white tracking-widest uppercase opacity-60", children: "SBC Master V1.0.20" }),
 u$1(
                     "button",
                     {

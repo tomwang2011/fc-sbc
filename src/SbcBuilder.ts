@@ -10,6 +10,10 @@ export class SbcBuilder {
     return await Inventory.primeInventory(targetLevels);
   }
 
+  public static getMemory() {
+    return Inventory.memory;
+  }
+
   public static async solveLeague(log: (m: string) => void, settings: SolverSettings) {
     await LeagueSolver.solve(log, settings);
   }
