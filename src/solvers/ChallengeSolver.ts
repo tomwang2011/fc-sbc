@@ -9,49 +9,45 @@ export class ChallengeSolver {
     const { challenge, squad, controller } = ctx;
 
     log("Analyzing Complex Constraints...");
-    const constraints = {
+    const rules = {
+        targetRating: 0, targetChem: 0, minGold: 0, minRare: 0,
         maxSameClub: 11, maxSameNation: 11, maxSameLeague: 11,
         maxTotalNations: 11, maxTotalLeagues: 11,
-        minGold: 0, minRare: 0, targetRating: 0, targetChem: 0
+        seeds: [] as { type: string, ids: number[], count: number }[]
     };
-    
-    const hardReqs: { type: 'club' | 'nation' | 'league', id: number, count: number }[] = [];
 
     (challenge.eligibilityRequirements || []).forEach((r: any) => {
         const col = r.kvPairs._collection || r.kvPairs;
         for (let k in col) {
             const key = parseInt(k);
             const val = Utils.getCleanValue(col[k]);
-            const vals = Array.isArray(val) ? val : [val];
+            const vals = (Array.isArray(val) ? val : [val]).filter(v => v !== undefined);
+            
+            if (key === 19) rules.targetRating = Math.max(rules.targetRating, vals[0] || 0);
+            if (key === 35 || key === 20) rules.targetChem = Math.max(rules.targetChem, vals[0] || 0);
+            if (key === 17 && vals.includes(3)) rules.minGold = r.count;
+            if (key === 25 && vals.includes(4)) rules.minRare = r.count;
 
-            if (key === 19) constraints.targetRating = Math.max(constraints.targetRating, r.count || vals[0] || 0);
-            if (key === 35 || key === 20) constraints.targetChem = Math.max(constraints.targetChem, vals[0] || 0);
-            if (key === 17 && vals.includes(3)) constraints.minGold = r.count;
-            if (key === 25 && vals.includes(4)) constraints.minRare = r.count;
-
-            // Diversity Mapping (Semantic)
-            if (key === 5) {
-                if (r.scope === 1) constraints.maxSameNation = vals[0];
-                else constraints.maxTotalNations = vals[0];
+            if (r.count === -1) {
+                if (r.scope === 1) {
+                    if (key === 5 || key === 7 || key === 9) rules.maxTotalNations = Math.min(rules.maxTotalNations, vals[0]);
+                    if (key === 6 || key === 10 || key === 12) rules.maxTotalLeagues = Math.min(rules.maxTotalLeagues, vals[0]);
+                } else {
+                    if (key === 5 || key === 9) rules.maxSameNation = Math.min(rules.maxSameNation, vals[0]);
+                    if (key === 6 || key === 10) rules.maxSameLeague = Math.min(rules.maxSameLeague, vals[0]);
+                    if (key === 7 || key === 12) rules.maxSameClub = Math.min(rules.maxSameClub, vals[0]);
+                }
+            } else {
+                const validIds = vals.filter(id => id > 0);
+                if (validIds.length > 0) {
+                    const type = (key === 14 || key === 12 || key === 7) ? 'club' : ((key === 15 || key === 5 || key === 9) ? 'nation' : 'league');
+                    rules.seeds.push({ type, ids: validIds, count: r.count });
+                }
             }
-            if (key === 6) {
-                if (r.scope === 1) constraints.maxSameLeague = vals[0];
-                else constraints.maxTotalLeagues = vals[0];
-            }
-            if (key === 7) {
-                constraints.maxSameClub = vals[0];
-            }
-            if (key === 9 && vals[0] === -1) constraints.maxTotalNations = r.count;
-            if (key === 10 && vals[0] === -1) constraints.maxTotalLeagues = r.count;
-
-            // Entity Mapping (Specific Seeds)
-            if (key === 14) vals.forEach(id => hardReqs.push({ type: 'club', id, count: r.count || 1 }));
-            if (key === 15 && vals[0] > 0) vals.forEach(id => hardReqs.push({ type: 'nation', id, count: r.count || 1 }));
-            if (key === 11 && vals[0] > 10) vals.forEach(id => hardReqs.push({ type: 'league', id, count: r.count || 1 }));
         }
     });
 
-    log(`Targets: ${constraints.targetChem} Chem | Nations: ${constraints.maxTotalNations} (MaxSame: ${constraints.maxSameNation})`);
+    log(`Targets: ${rules.targetChem} Chem | Nations: ${rules.maxTotalNations} Max Total`);
 
     log("Performing Multi-Pass Sync...");
     await Promise.all([
@@ -65,162 +61,129 @@ export class ChallengeSolver {
     await Inventory.primeInventory();
 
     const pool = Inventory.memory.filter(p => 
-        p.tradable === false && !p.evolutionInfo && p.rareflag <= 1 && p.rating < 85
+        p.tradable === false && !p.evolutionInfo && p.rareflag <= 1 && p.rating < 89
     );
 
     const activeSlots = squad.getSBCSlots().filter((s: any) => !s.isBrick() && s.index <= 10);
 
-    const getStats = (items: (EAItem | null)[]) => {
-        const active = items.filter(p => p !== null) as EAItem[];
-        if (active.length === 0) return { chem: 0, rating: 0, nations: 0, rare: 0, gold: 0 };
-        
-        const tempPlayers = new Array(23).fill(null);
-        activeSlots.forEach((slot: any, i: number) => { if (items[i]) tempPlayers[slot.index] = items[i]; });
-        squad.setPlayers(tempPlayers);
-        
-        return { 
-            chem: squad.getChemistry(), 
-            rating: Utils.calculateRating(items), 
-            nations: new Set(active.map(p => p.nationId)).size, 
-            gold: active.filter(p => p.rating >= 75).length, 
-            rare: active.filter(p => p.rareflag === 1).length 
-        };
+    // --- STEP 3: OVERLAP DISCOVERY ---
+    const overlaps: Record<string, { lid: number, nid: number, count: number }> = {};
+    pool.forEach(p => {
+        const key = `${p.leagueId}-${p.nationId}`;
+        if (!overlaps[key]) overlaps[key] = { lid: p.leagueId!, nid: p.nationId!, count: 0 };
+        overlaps[key].count++;
+    });
+
+    const trialOverlaps = Object.values(overlaps)
+        .sort((a,b) => b.count - a.count)
+        .slice(0, 15);
+
+    const calculateRating = (items: (EAItem | null)[]) => {
+        const active = items.filter(p => p !== null);
+        if (active.length < 11) return 0;
+        const ratings = active.map(p => p!.rating);
+        const sum = ratings.reduce((a, b) => a + b, 0);
+        const avg = sum / 11;
+        let cf = 0; ratings.forEach(r => { if (r > avg) cf += (r - avg); });
+        return Math.floor((sum + cf) / 11 + 0.0401);
     };
 
-    const runTrial = (lid: number, nid: number) => {
+    const runTrial = (ov: { lid: number, nid: number }) => {
         const selected: (EAItem | null)[] = new Array(11).fill(null);
         const usedIds = new Set<number>(); const usedPersonaIds = new Set<number>();
-        const counts: any = { club: {}, nation: {}, league: {}, gold: 0, rare: 0 };
-        const fulfilled = { club: {} as any, nation: {} as any, league: {} as any };
+        const counts: any = { nation: new Map(), league: new Map(), club: {} };
+        const fulfilled = new Array(rules.seeds.length).fill(0);
         let iterations = 0;
+
+        const updateState = (p: EAItem, add: boolean) => {
+            const mod = add ? 1 : -1;
+            counts.club[p.teamId!] = (counts.club[p.teamId!] || 0) + mod;
+            rules.seeds.forEach((s, i) => {
+                const match = (s.type === 'club' && s.ids.includes(p.teamId!)) ||
+                              (s.type === 'nation' && s.ids.includes(p.nationId!)) ||
+                              (s.type === 'league' && s.ids.includes(p.leagueId!));
+                if (match) fulfilled[i] += mod;
+            });
+            if (add) {
+                counts.nation.set(p.nationId, (counts.nation.get(p.nationId) || 0) + 1);
+                counts.league.set(p.leagueId, (counts.league.get(p.leagueId) || 0) + 1);
+            } else {
+                const nC = counts.nation.get(p.nationId) - 1;
+                if (nC <= 0) counts.nation.delete(p.nationId); else counts.nation.set(p.nationId, nC);
+                const lC = counts.league.get(p.leagueId) - 1;
+                if (lC <= 0) counts.league.delete(p.leagueId); else counts.league.set(p.leagueId, lC);
+            }
+        };
 
         const isValid = (p: EAItem, slotIdx: number) => {
             if (usedIds.has(p.id) || usedPersonaIds.has(p._personaId!)) return false;
+            if ((counts.club[p.teamId!] || 0) >= rules.maxSameClub) return false;
+            if ((counts.nation.get(p.nationId) || 0) >= rules.maxSameNation) return false;
+            if ((counts.league.get(p.leagueId) || 0) >= rules.maxSameLeague) return false;
+            if (!counts.nation.has(p.nationId) && counts.nation.size >= rules.maxTotalNations) return false;
+            if (!counts.league.has(p.leagueId) && counts.league.size >= rules.maxTotalLeagues) return false;
             
-            const currentNations = new Set(selected.filter(x => x).map(x => x!.nationId));
-            const currentLeagues = new Set(selected.filter(x => x).map(x => x!.leagueId));
-
-            // Diversity Limits check (Total count)
-            if (!currentNations.has(p.nationId) && currentNations.size >= constraints.maxTotalNations) return false;
-            if (!currentLeagues.has(p.leagueId) && currentLeagues.size >= constraints.maxTotalLeagues) return false;
-
-            // Same Entity Limits check (Per-nation/per-league count)
-            if ((counts.club[p.teamId!] || 0) >= constraints.maxSameClub) return false;
-            if ((counts.nation[p.nationId!] || 0) >= constraints.maxSameNation) return false;
-            if ((counts.league[p.leagueId!] || 0) >= (p.leagueId === lid ? 11 : constraints.maxSameLeague)) return false;
-
-            const slotsLeft = 11 - slotIdx - 1;
-            
-            // Hard req pruning
-            for (const req of hardReqs) {
-                const current = (fulfilled as any)[req.type][req.id] || 0;
-                const needed = req.count - current;
-                if (needed > slotsLeft + 1) return false;
+            const left = 11 - slotIdx - 1;
+            for (let i = 0; i < rules.seeds.length; i++) {
+                if (rules.seeds[i].count - fulfilled[i] > left + 1) return false;
             }
-
-            if (counts.gold < constraints.minGold && (constraints.minGold - counts.gold) > slotsLeft + (p.rating >= 75 ? 1 : 0)) return false;
-            if (counts.rare < constraints.minRare && (constraints.minRare - counts.rare) > slotsLeft + (p.rareflag === 1 ? 1 : 0)) return false;
             return true;
         };
 
         const solve = (idx: number): boolean => {
-            iterations++; if (iterations > 3000) return false;
-            if (idx === 11) return true;
+            iterations++; if (iterations > 5000) return false;
+            if (idx === 11) {
+                const tempArr = new Array(23).fill(null);
+                activeSlots.forEach((slot: any, i: number) => tempArr[slot.index] = selected[i]);
+                squad.setPlayers(tempArr);
+                return calculateRating(selected) >= rules.targetRating && squad.getChemistry() >= rules.targetChem;
+            }
+
             const slotPos = Utils.normalizePos(activeSlots[idx].position?.id || activeSlots[idx]._position);
-            
-            // Heuristic Scoring
             const candidates = pool.filter(p => isValid(p, idx))
                 .map(p => {
                     let score = 0;
-                    hardReqs.forEach(req => {
-                        const current = (fulfilled as any)[req.type][req.id] || 0;
-                        if (current < req.count) {
-                            if (req.type === 'club' && p.teamId === req.id) score += 2000;
-                            if (req.type === 'nation' && p.nationId === req.id) score += 1000;
-                            if (req.type === 'league' && p.leagueId === req.id) score += 500;
-                        }
-                    });
-                    if (p.leagueId === lid || p.nationId === nid) score += 50;
-                    if (Utils.normalizePos(p.preferredPosition) === slotPos) score += 100;
+                    rules.seeds.forEach((s, si) => { if (fulfilled[si] < s.count && ((s.type==='club' && s.ids.includes(p.teamId!))||(s.type==='nation' && s.ids.includes(p.nationId!))||(s.type==='league' && s.ids.includes(p.leagueId!)))) score += 10000; });
+                    if (p.leagueId === ov.lid && p.nationId === ov.nid) score += 5000;
+                    else if (p.nationId === ov.nid) score += 1000;
+                    if (Utils.normalizePos(p.preferredPosition) === slotPos) score += 500;
                     return { p, score };
                 })
                 .sort((a,b) => b.score - a.score || (a.p.rating - b.p.rating))
-                .slice(0, 10)
-                .map(c => c.p);
-            
+                .slice(0, 15).map(c => c.p);
+
             for (const p of candidates) {
                 selected[idx] = p; usedIds.add(p.id); usedPersonaIds.add(p._personaId!);
-                counts.club[p.teamId!] = (counts.club[p.teamId!] || 0) + 1;
-                counts.nation[p.nationId!] = (counts.nation[p.nationId!] || 0) + 1;
-                counts.league[p.leagueId!] = (counts.league[p.leagueId!] || 0) + 1;
-                if (p.rating >= 75) counts.gold++; if (p.rareflag === 1) counts.rare++;
-                
-                // Track fulfilled hard reqs
-                hardReqs.forEach(req => {
-                    if (req.type === 'club' && p.teamId === req.id) fulfilled.club[req.id] = (fulfilled.club[req.id] || 0) + 1;
-                    if (req.type === 'nation' && p.nationId === req.id) fulfilled.nation[req.id] = (fulfilled.nation[req.id] || 0) + 1;
-                    if (req.type === 'league' && p.leagueId === req.id) fulfilled.league[req.id] = (fulfilled.league[req.id] || 0) + 1;
-                });
-
+                updateState(p, true);
                 if (solve(idx + 1)) return true;
-
+                updateState(p, false);
                 selected[idx] = null; usedIds.delete(p.id); usedPersonaIds.delete(p._personaId!);
-                counts.club[p.teamId!]--; counts.nation[p.nationId!]--; counts.league[p.leagueId!]--;
-                if (p.rating >= 75) counts.gold--; if (p.rareflag === 1) counts.rare--;
-                
-                hardReqs.forEach(req => {
-                    if (req.type === 'club' && p.teamId === req.id) fulfilled.club[req.id]--;
-                    if (req.type === 'nation' && p.nationId === req.id) fulfilled.nation[req.id]--;
-                    if (req.type === 'league' && p.leagueId === req.id) fulfilled.league[req.id]--;
-                });
             }
             return false;
         };
-        return solve(0) ? { squad: selected, lid, nid } : null;
+        return solve(0) ? { squad: [...selected] } : null;
     };
 
-    const lCounts: any = {}; pool.forEach(p => lCounts[p.leagueId!] = (lCounts[p.leagueId!] || 0) + 1);
-    const topLeagues = Object.entries(lCounts).sort((a: any,b: any) => b[1]-a[1]).slice(0, 8).map(x => parseInt(x[0]));
-    
     let best: any = null;
-    for (const lid of topLeagues) {
-        const res = runTrial(lid, 0);
-        if (!res) continue;
-        const stats = getStats(res.squad);
-        const valid = stats.chem >= constraints.targetChem && 
-                      stats.rating >= constraints.targetRating && 
-                      stats.gold >= constraints.minGold && 
-                      stats.rare >= constraints.minRare &&
-                      stats.nations <= constraints.maxTotalNations;
-        
-        if (valid && (!best || stats.chem > best.chem)) best = { ...res, ...stats };
-        if (best && best.chem >= 33) break;
+    for (const ov of trialOverlaps) {
+        const res = runTrial(ov);
+        if (res) {
+            const tempArr = new Array(23).fill(null);
+            activeSlots.forEach((slot: any, i: number) => tempArr[slot.index] = res.squad[i]);
+            squad.setPlayers(tempArr);
+            const chem = squad.getChemistry();
+            if (!best || chem > best.chem) { best = { squad: res.squad, chem }; if (chem >= 33) break; }
+        }
     }
 
     if (best) {
-        log(`✅ CSP Success: ${best.chem} Chem | ${best.rating} Rating`);
-        
-        // Phase 4: Position Shuffle for extra chem
-        for (let i = 0; i < 11; i++) {
-            for (let j = i + 1; j < 11; j++) {
-                const temp = [...best.squad];
-                [temp[i], temp[j]] = [temp[j], temp[i]];
-                const newChem = getStats(temp).chem;
-                if (newChem > best.chem) {
-                    best.squad = temp; best.chem = newChem;
-                    console.log(`[SHUFFLE] Improved chem to ${newChem}`);
-                }
-            }
-        }
-
         const final = new Array(23).fill(null);
         best.squad.forEach((p: any, i: number) => { if (p) final[activeSlots[i].index] = p; });
         squad.setPlayers(final);
         await Utils.saveSquad(challenge, squad, controller);
-        log("✅ Challenge Solved.");
+        log(`✅ Challenge Solved: ${best.chem} Chem`);
     } else {
-        log("❌ CSP Engine failed to find valid solution.");
+        log("❌ Failed to find structural solution.");
     }
-
   }
 }
