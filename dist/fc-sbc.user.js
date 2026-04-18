@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC SBC Enhanced Builder
 // @namespace    fc-sbc-builder
-// @version      1.0.20
+// @version      1.0.21
 // @author       tomwang
 // @description  Optimal SBC builder with Storage-First priority
 // @license      ISC
@@ -896,7 +896,6 @@
       const { challenge, squad, controller } = ctx;
       log("Analyzing Complex Constraints...");
       const constraints = {
-        maxSameClub: 11,
         maxSameNation: 11,
         maxSameLeague: 11,
         maxTotalNations: 11,
@@ -912,61 +911,40 @@
         const vals = Object.values(col).map((v2) => Utils.getCleanValue(v2)).flat();
         if (keys.includes(19)) constraints.targetRating = Math.max(constraints.targetRating, r2.count || vals[0] || 0);
         if (keys.includes(35)) constraints.targetChem = Math.max(constraints.targetChem, vals[0] || 0);
-        if (keys.includes(17) && vals.includes(3)) constraints.minGold = r2.count;
-        if (keys.includes(25) && vals.includes(4)) constraints.minRare = r2.count;
+        if (keys.includes(17) && (vals.includes(3) || vals.includes(17))) constraints.minGold = r2.count;
+        if (keys.includes(25) && (vals.includes(4) || vals.includes(25))) constraints.minRare = r2.count;
         if (keys.includes(15) || keys.includes(5)) {
           if (r2.count > 0 && r2.count < 11) constraints.maxTotalNations = Math.min(constraints.maxTotalNations, r2.count);
-          vals.forEach((v2) => {
-            if (typeof v2 === "number" && v2 > 0 && v2 < 5) constraints.maxTotalNations = Math.min(constraints.maxTotalNations, v2);
-          });
         }
         if (keys.includes(12) || keys.includes(6)) {
           if (r2.count > 0 && r2.count < 11) constraints.maxTotalLeagues = Math.min(constraints.maxTotalLeagues, r2.count);
         }
       });
-      log(`Targets: ${constraints.targetChem} Chem | ${constraints.maxTotalNations} Nations | ${constraints.minGold} Gold`);
+      log(`Targets: ${constraints.targetChem} Chem | ${constraints.minGold} Gold`);
       log("Performing Multi-Pass Sync...");
       await Promise.all([
         Inventory.fetchItems({ count: 250 }),
-Inventory.fetchItems({ league: 13, count: 50 }),
-Inventory.fetchItems({ league: 53, count: 50 }),
-Inventory.fetchItems({ league: 19, count: 50 })
-]);
+        Inventory.fetchItems({ league: 13, count: 50 }),
+        Inventory.fetchItems({ league: 53, count: 50 }),
+        Inventory.fetchItems({ league: 19, count: 50 }),
+        Inventory.fetchItems({ league: 31, count: 50 }),
+        Inventory.fetchItems({ league: 16, count: 50 })
+      ]);
       await Inventory.primeInventory();
       const pool = Inventory.memory.filter(
-        (p2) => p2.tradable === false && !p2.evolutionInfo && p2.rareflag <= 1 && p2.rating < 83
+        (p2) => p2.tradable === false && !p2.evolutionInfo && p2.rareflag <= 1 && p2.rating < 85
       );
       const activeSlots = squad.getSBCSlots().filter((s2) => !s2.isBrick() && s2.index <= 10);
       const getStats = (items) => {
         const active = items.filter((p2) => p2 !== null);
         if (active.length === 0) return { chem: 0, rating: 0, nations: 0, rare: 0, gold: 0 };
-        let chem = 0;
-        const nMap = {}, lMap = {}, cMap = {};
-        const inPos = items.map((p2, i2) => {
-          if (!p2) return false;
-          const slotPos = Utils.normalizePos(activeSlots[i2].position?.id || activeSlots[i2]._position);
-          const ok = Utils.normalizePos(p2.preferredPosition) === slotPos;
-          if (ok) {
-            nMap[p2.nationId] = (nMap[p2.nationId] || 0) + 1;
-            lMap[p2.leagueId] = (lMap[p2.leagueId] || 0) + 1;
-            cMap[p2.teamId] = (cMap[p2.teamId] || 0) + 1;
-          }
-          return ok;
+        const tempPlayers = new Array(23).fill(null);
+        activeSlots.forEach((slot, i2) => {
+          if (items[i2]) tempPlayers[slot.index] = items[i2];
         });
-        items.forEach((p2, i2) => {
-          if (!p2 || !inPos[i2]) return;
-          if (nMap[p2.nationId] >= 9) chem += 3;
-          else if (nMap[p2.nationId] >= 6) chem += 2;
-          else if (nMap[p2.nationId] >= 3) chem += 1;
-          if (lMap[p2.leagueId] >= 8) chem += 3;
-          else if (lMap[p2.leagueId] >= 5) chem += 2;
-          else if (lMap[p2.leagueId] >= 3) chem += 1;
-          if (cMap[p2.teamId] >= 7) chem += 3;
-          else if (cMap[p2.teamId] >= 4) chem += 2;
-          else if (cMap[p2.teamId] >= 2) chem += 1;
-        });
+        squad.setPlayers(tempPlayers);
         return {
-          chem,
+          chem: squad.getChemistry(),
           rating: Utils.calculateRating(items),
           nations: new Set(active.map((p2) => p2.nationId)).size,
           gold: active.filter((p2) => p2.rating >= 75).length,
@@ -981,24 +959,30 @@ Inventory.fetchItems({ league: 19, count: 50 })
         let iterations = 0;
         const isValid = (p2, slotIdx) => {
           if (usedIds.has(p2.id) || usedPersonaIds.has(p2._personaId)) return false;
-          if ((counts.club[p2.teamId] || 0) >= constraints.maxSameClub) return false;
+          if ((counts.club[p2.teamId] || 0) >= 4) return false;
           if ((counts.nation[p2.nationId] || 0) >= constraints.maxSameNation) return false;
           if ((counts.league[p2.leagueId] || 0) >= (p2.leagueId === lid ? 11 : constraints.maxSameLeague)) return false;
-          const curNations = new Set(selected.filter((x2) => x2).map((x2) => x2.nationId));
-          if (!curNations.has(p2.nationId) && curNations.size >= constraints.maxTotalNations) return false;
           const slotsLeft = 11 - slotIdx - 1;
           if (counts.gold < constraints.minGold && constraints.minGold - counts.gold > slotsLeft + (p2.rating >= 75 ? 1 : 0)) return false;
           if (counts.rare < constraints.minRare && constraints.minRare - counts.rare > slotsLeft + (p2.rareflag === 1 ? 1 : 0)) return false;
           return true;
         };
-        const sortedPool = [...pool].sort((a2, b2) => a2.leagueId === lid && a2.nationId === nid ? -1 : 1);
+        const sortedPool = [...pool].sort((a2, b2) => {
+          const aMatch = a2.leagueId === lid || a2.nationId === nid ? 0 : 1;
+          const bMatch = b2.leagueId === lid || b2.nationId === nid ? 0 : 1;
+          return aMatch - bMatch || a2.rating - b2.rating;
+        });
         const solve = (idx) => {
           iterations++;
-          if (iterations > 3e3) return false;
+          if (iterations > 2e3) return false;
           if (idx === 11) return true;
           const slotPos = Utils.normalizePos(activeSlots[idx].position?.id || activeSlots[idx]._position);
-          const candidates2 = sortedPool.filter((p2) => isValid(p2, idx)).sort((a2, b2) => Utils.normalizePos(a2.preferredPosition) === slotPos ? -1 : 1).slice(0, 15);
-          for (const p2 of candidates2) {
+          const candidates = sortedPool.filter((p2) => isValid(p2, idx)).sort((a2, b2) => {
+            const aPosMatch = Utils.normalizePos(a2.preferredPosition) === slotPos ? 0 : 1;
+            const bPosMatch = Utils.normalizePos(b2.preferredPosition) === slotPos ? 0 : 1;
+            return aPosMatch - bPosMatch;
+          }).slice(0, 8);
+          for (const p2 of candidates) {
             selected[idx] = p2;
             usedIds.add(p2.id);
             usedPersonaIds.add(p2._personaId);
@@ -1019,37 +1003,43 @@ Inventory.fetchItems({ league: 19, count: 50 })
           }
           return false;
         };
-        return solve(0) ? { squad: selected, ...getStats(selected), lid, nid } : null;
+        return solve(0) ? { squad: selected, lid, nid } : null;
       };
       const lCounts = {};
       pool.forEach((p2) => lCounts[p2.leagueId] = (lCounts[p2.leagueId] || 0) + 1);
-      const topLeagues = Object.entries(lCounts).sort((a2, b2) => b2[1] - a2[1]).slice(0, 10).map((x2) => parseInt(x2[0]));
-      const candidates = [];
-      topLeagues.forEach((lid) => {
-        const lp = pool.filter((p2) => p2.leagueId === lid);
-        const nc = {};
-        lp.forEach((p2) => nc[p2.nationId] = (nc[p2.nationId] || 0) + 1);
-        Object.entries(nc).sort((a2, b2) => b2[1] - a2[1]).slice(0, 3).forEach((n2) => candidates.push({ lid, nid: parseInt(n2[0]) }));
-      });
+      const topLeagues = Object.entries(lCounts).sort((a2, b2) => b2[1] - a2[1]).slice(0, 8).map((x2) => parseInt(x2[0]));
       let best = null;
-      for (const c2 of candidates) {
-        const res = runTrial(c2.lid, c2.nid);
+      for (const lid of topLeagues) {
+        const res = runTrial(lid, 0);
         if (!res) continue;
-        const valid = res.chem >= constraints.targetChem && res.rating >= constraints.targetRating && res.gold >= constraints.minGold && res.rare >= constraints.minRare && res.nations <= constraints.maxTotalNations;
-        const score = res.chem * 100 + (1e3 - Math.abs(res.rating - constraints.targetRating) * 10);
-        if (valid && (!best || score > best.score)) best = { ...res, score };
+        const stats = getStats(res.squad);
+        const valid = stats.chem >= constraints.targetChem && stats.rating >= constraints.targetRating && stats.gold >= constraints.minGold && stats.rare >= constraints.minRare;
+        if (valid && (!best || stats.chem > best.chem)) best = { ...res, ...stats };
+        if (best && best.chem >= 33) break;
       }
       if (best) {
-        log(`✅ Found Solution: L:${best.lid} N:${best.nid} (${best.chem} Chem)`);
+        log(`✅ CSP Success: ${best.chem} Chem | ${best.rating} Rating`);
+        for (let i2 = 0; i2 < 11; i2++) {
+          for (let j2 = i2 + 1; j2 < 11; j2++) {
+            const temp = [...best.squad];
+            [temp[i2], temp[j2]] = [temp[j2], temp[i2]];
+            const newChem = getStats(temp).chem;
+            if (newChem > best.chem) {
+              best.squad = temp;
+              best.chem = newChem;
+              console.log(`[SHUFFLE] Improved chem to ${newChem}`);
+            }
+          }
+        }
         const final = new Array(23).fill(null);
         best.squad.forEach((p2, i2) => {
           if (p2) final[activeSlots[i2].index] = p2;
         });
         squad.setPlayers(final);
         await Utils.saveSquad(challenge, squad, controller);
-        log("✅ Challenge Solved and Saved.");
+        log("✅ Challenge Solved.");
       } else {
-        log("❌ No Valid Solution Found. Adjusting discovery might help.");
+        log("❌ CSP Engine failed to find valid solution.");
       }
     }
   }
@@ -1191,7 +1181,7 @@ u$1(
               className: "animate-in slide-in-from-left-4 fade-in duration-300",
               children: [
 u$1("div", { className: "flex justify-between items-center mb-6", children: [
-u$1("h2", { className: "text-xs font-black text-white tracking-widest uppercase opacity-60", children: "SBC Master V1.0.20" }),
+u$1("h2", { className: "text-xs font-black text-white tracking-widest uppercase opacity-60", children: "SBC Master V1.0.21" }),
 u$1(
                     "button",
                     {
