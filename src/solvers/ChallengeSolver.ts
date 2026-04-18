@@ -29,19 +29,33 @@ export class ChallengeSolver {
 
         // Specific Entity Requirements (Seeds)
         if (keys.includes(14)) vals.forEach(id => hardReqs.push({ type: 'club', id, count: r.count || 1 }));
-        if (keys.includes(5)) vals.forEach(id => hardReqs.push({ type: 'nation', id, count: r.count || 1 }));
-        if (keys.includes(6)) vals.forEach(id => hardReqs.push({ type: 'league', id, count: r.count || 1 }));
+        if (keys.includes(5)) {
+            const count = r.count || (Array.isArray(vals) ? vals[0] : vals);
+            if (r.scope === 1) constraints.maxSameNation = Math.min(constraints.maxSameNation, count);
+            else vals.forEach(id => hardReqs.push({ type: 'nation', id, count: r.count || 1 }));
+        }
+        if (keys.includes(6)) {
+            const count = r.count || (Array.isArray(vals) ? vals[0] : vals);
+            if (r.scope === 1) constraints.maxSameLeague = Math.min(constraints.maxSameLeague, count);
+            else vals.forEach(id => hardReqs.push({ type: 'league', id, count: r.count || 1 }));
+        }
 
         // Diversity/Limits
         if (keys.includes(15)) {
-            if (r.count > 0 && r.count < 11) constraints.maxTotalNations = Math.min(constraints.maxTotalNations, r.count);
+            if (r.count > 0 && r.count < 11) {
+                if (r.scope === 1) constraints.maxSameNation = Math.min(constraints.maxSameNation, r.count);
+                else constraints.maxTotalNations = Math.min(constraints.maxTotalNations, r.count);
+            }
         }
         if (keys.includes(12)) {
-            if (r.count > 0 && r.count < 11) constraints.maxTotalLeagues = Math.min(constraints.maxTotalLeagues, r.count);
+            if (r.count > 0 && r.count < 11) {
+                if (r.scope === 1) constraints.maxSameLeague = Math.min(constraints.maxSameLeague, r.count);
+                else constraints.maxTotalLeagues = Math.min(constraints.maxTotalLeagues, r.count);
+            }
         }
     });
 
-    log(`Targets: ${constraints.targetChem} Chem | ${constraints.minGold} Gold | ${hardReqs.length} Hard Reqs`);
+    log(`Targets: ${constraints.targetChem} Chem | Nations: ${constraints.maxTotalNations} (MaxSame: ${constraints.maxSameNation})`);
 
     log("Performing Multi-Pass Sync...");
     await Promise.all([
@@ -90,9 +104,13 @@ export class ChallengeSolver {
             const currentNations = new Set(selected.filter(x => x).map(x => x!.nationId));
             const currentLeagues = new Set(selected.filter(x => x).map(x => x!.leagueId));
 
-            // Diversity Limits check
+            // Diversity Limits check (Total count)
             if (!currentNations.has(p.nationId) && currentNations.size >= constraints.maxTotalNations) return false;
             if (!currentLeagues.has(p.leagueId) && currentLeagues.size >= constraints.maxTotalLeagues) return false;
+
+            // Same Entity Limits check (Per-nation/per-league count)
+            if ((counts.nation[p.nationId!] || 0) >= constraints.maxSameNation) return false;
+            if ((counts.league[p.leagueId!] || 0) >= (p.leagueId === lid ? 11 : constraints.maxSameLeague)) return false;
 
             const slotsLeft = 11 - slotIdx - 1;
             
