@@ -103,27 +103,45 @@ export class DeCloggerSolver {
     if (targetRating > 0) {
         log("Optimizing fodder usage...");
         let optAttempts = 0;
-        while (optAttempts < 50) {
+        // Increase attempts and ensure we check the whole pool for 81/82s
+        while (optAttempts < 100) {
             optAttempts++;
             const currentRating = Utils.calculateRating(selected);
             if (currentRating <= targetRating) break;
 
-            const ratings = selected.map((s, idx) => ({ rating: s!.rating, index: idx })).filter(x => x.index !== 0);
+            // Target the highest rated non-anchor card
+            const ratings = selected.map((s, idx) => ({ rating: s!.rating, index: idx, sourceType: s!._sourceType })).filter(x => x.index !== 0);
+            if (ratings.length === 0) break;
+
             const maxR = Math.max(...ratings.map(r => r.rating));
             const downIdx = ratings.find(r => r.rating === maxR)!.index;
             const currentItem = selected[downIdx]!;
 
-            const downgrade = pool.find(p => !usedIds.has(p.id) && !usedPersonaIds.has(p._personaId!) && p.rating < currentItem.rating && p.rareflag <= 1);
+            // Find a downgrade. If we have 84s in an 83 squad, this will naturally look for 82s/81s
+            const downgrade = pool.find(p => 
+                !usedIds.has(p.id) && 
+                !usedPersonaIds.has(p._personaId!) && 
+                p.rating < currentItem.rating && 
+                p.rareflag <= 1
+            );
             
             if (downgrade) {
                 const tempSquad = [...selected];
                 tempSquad[downIdx] = downgrade;
-                if (Utils.calculateRating(tempSquad) >= targetRating) {
-                    console.log(`[OPTIMIZE] Downgrading Slot ${downIdx}: ${currentItem.rating} -> ${downgrade.rating} (${downgrade._staticData?.name})`);
+                const newRating = Utils.calculateRating(tempSquad);
+                // Accept the downgrade if it brings us closer to or hits the target
+                if (newRating >= targetRating || (currentRating > targetRating && newRating < currentRating)) {
+                    console.log(`[OPTIMIZE] Downgrading Slot ${downIdx}: ${currentItem.rating} -> ${downgrade.rating} to offset high-rated cards.`);
                     usedIds.delete(currentItem.id); usedPersonaIds.delete(currentItem._personaId!);
                     selected[downIdx] = downgrade;
                     usedIds.add(downgrade.id); usedPersonaIds.add(downgrade._personaId!);
-                } else break;
+                    
+                    // If we hit target exactly, we can stop
+                    if (newRating === targetRating) break;
+                } else {
+                    // If this specific player doesn't work, we need to stop this branch to avoid infinite loop
+                    break;
+                }
             } else break;
         }
     }

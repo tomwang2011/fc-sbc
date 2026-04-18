@@ -87,6 +87,13 @@ export class ChallengeSolver {
         const isValid = (p: EAItem, slotIdx: number) => {
             if (usedIds.has(p.id) || usedPersonaIds.has(p._personaId!)) return false;
             
+            const currentNations = new Set(selected.filter(x => x).map(x => x!.nationId));
+            const currentLeagues = new Set(selected.filter(x => x).map(x => x!.leagueId));
+
+            // Diversity Limits check
+            if (!currentNations.has(p.nationId) && currentNations.size >= constraints.maxTotalNations) return false;
+            if (!currentLeagues.has(p.leagueId) && currentLeagues.size >= constraints.maxTotalLeagues) return false;
+
             const slotsLeft = 11 - slotIdx - 1;
             
             // Hard req pruning
@@ -165,7 +172,12 @@ export class ChallengeSolver {
         const res = runTrial(lid, 0);
         if (!res) continue;
         const stats = getStats(res.squad);
-        const valid = stats.chem >= constraints.targetChem && stats.rating >= constraints.targetRating && stats.gold >= constraints.minGold && stats.rare >= constraints.minRare;
+        const valid = stats.chem >= constraints.targetChem && 
+                      stats.rating >= constraints.targetRating && 
+                      stats.gold >= constraints.minGold && 
+                      stats.rare >= constraints.minRare &&
+                      stats.nations <= constraints.maxTotalNations;
+        
         if (valid && (!best || stats.chem > best.chem)) best = { ...res, ...stats };
         if (best && best.chem >= 33) break;
     }

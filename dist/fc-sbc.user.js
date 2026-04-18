@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC SBC Enhanced Builder
 // @namespace    fc-sbc-builder
-// @version      1.0.23
+// @version      1.0.24
 // @author       tomwang
 // @description  Optimal SBC builder with Storage-First priority
 // @license      ISC
@@ -533,12 +533,14 @@
         items.forEach((p2) => {
           if (p2 && p2.id && !allPlayers.has(p2.id)) {
             const isEvo = !!p2.evolutionInfo || p2.rareflag === 116 || p2.upgrades !== null;
-            if (p2.limitedUseType === 2 || isEvo) return;
+            if (p2.limitedUseType === 2 || isEvo || source === "unassigned") {
+              if (source === "unassigned") unassignedCount++;
+              return;
+            }
             p2._sourceType = source;
-            p2._sourcePriority = source === "storage" ? 0 : source === "unassigned" ? 1 : 2;
+            p2._sourcePriority = source === "storage" ? 0 : 2;
             p2._personaId = Number(p2.definitionId) % 16777216;
             if (source === "storage") storageCount++;
-            if (source === "unassigned") unassignedCount++;
             allPlayers.set(p2.id, p2);
           }
         });
@@ -581,7 +583,7 @@
       const pool = Inventory.memory.filter((p2) => {
         if (settings.untradOnly && p2.tradable === true) return false;
         if (settings.excludedLeagues.includes(p2.leagueId)) return false;
-        if (p2.rating >= 83 && p2._sourceType !== "storage") return false;
+        if (p2.rating > 82) return false;
         if (globalLeagues.length > 0 && !globalLeagues.includes(p2.leagueId)) return false;
         const isStandard = p2.rareflag === 0 || p2.rareflag === 1 || isTotwReq && (p2.rarityId === 3 || p2.rareflag === 3);
         if (!isStandard) return false;
@@ -794,26 +796,33 @@
       if (targetRating > 0) {
         log("Optimizing fodder usage...");
         let optAttempts = 0;
-        while (optAttempts < 50) {
+        while (optAttempts < 100) {
           optAttempts++;
           const currentRating = Utils.calculateRating(selected);
           if (currentRating <= targetRating) break;
-          const ratings = selected.map((s2, idx) => ({ rating: s2.rating, index: idx })).filter((x2) => x2.index !== 0);
+          const ratings = selected.map((s2, idx) => ({ rating: s2.rating, index: idx, sourceType: s2._sourceType })).filter((x2) => x2.index !== 0);
+          if (ratings.length === 0) break;
           const maxR = Math.max(...ratings.map((r2) => r2.rating));
           const downIdx = ratings.find((r2) => r2.rating === maxR).index;
           const currentItem = selected[downIdx];
-          const downgrade = pool.find((p2) => !usedIds.has(p2.id) && !usedPersonaIds.has(p2._personaId) && p2.rating < currentItem.rating && p2.rareflag <= 1);
+          const downgrade = pool.find(
+            (p2) => !usedIds.has(p2.id) && !usedPersonaIds.has(p2._personaId) && p2.rating < currentItem.rating && p2.rareflag <= 1
+          );
           if (downgrade) {
             const tempSquad = [...selected];
             tempSquad[downIdx] = downgrade;
-            if (Utils.calculateRating(tempSquad) >= targetRating) {
-              console.log(`[OPTIMIZE] Downgrading Slot ${downIdx}: ${currentItem.rating} -> ${downgrade.rating} (${downgrade._staticData?.name})`);
+            const newRating = Utils.calculateRating(tempSquad);
+            if (newRating >= targetRating || currentRating > targetRating && newRating < currentRating) {
+              console.log(`[OPTIMIZE] Downgrading Slot ${downIdx}: ${currentItem.rating} -> ${downgrade.rating} to offset high-rated cards.`);
               usedIds.delete(currentItem.id);
               usedPersonaIds.delete(currentItem._personaId);
               selected[downIdx] = downgrade;
               usedIds.add(downgrade.id);
               usedPersonaIds.add(downgrade._personaId);
-            } else break;
+              if (newRating === targetRating) break;
+            } else {
+              break;
+            }
           } else break;
         }
       }
@@ -974,6 +983,10 @@
         let iterations = 0;
         const isValid = (p2, slotIdx) => {
           if (usedIds.has(p2.id) || usedPersonaIds.has(p2._personaId)) return false;
+          const currentNations = new Set(selected.filter((x2) => x2).map((x2) => x2.nationId));
+          const currentLeagues = new Set(selected.filter((x2) => x2).map((x2) => x2.leagueId));
+          if (!currentNations.has(p2.nationId) && currentNations.size >= constraints.maxTotalNations) return false;
+          if (!currentLeagues.has(p2.leagueId) && currentLeagues.size >= constraints.maxTotalLeagues) return false;
           const slotsLeft = 11 - slotIdx - 1;
           for (const req of hardReqs) {
             const current = fulfilled[req.type][req.id] || 0;
@@ -1044,7 +1057,7 @@
         const res = runTrial(lid, 0);
         if (!res) continue;
         const stats = getStats(res.squad);
-        const valid = stats.chem >= constraints.targetChem && stats.rating >= constraints.targetRating && stats.gold >= constraints.minGold && stats.rare >= constraints.minRare;
+        const valid = stats.chem >= constraints.targetChem && stats.rating >= constraints.targetRating && stats.gold >= constraints.minGold && stats.rare >= constraints.minRare && stats.nations <= constraints.maxTotalNations;
         if (valid && (!best || stats.chem > best.chem)) best = { ...res, ...stats };
         if (best && best.chem >= 33) break;
       }
@@ -1212,7 +1225,7 @@ u$1(
               className: "animate-in slide-in-from-left-4 fade-in duration-300",
               children: [
 u$1("div", { className: "flex justify-between items-center mb-6", children: [
-u$1("h2", { className: "text-xs font-black text-white tracking-widest uppercase opacity-60", children: "SBC Master V1.0.23" }),
+u$1("h2", { className: "text-xs font-black text-white tracking-widest uppercase opacity-60", children: "SBC Master V1.0.24" }),
 u$1(
                     "button",
                     {

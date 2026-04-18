@@ -36,7 +36,8 @@ export class LeagueSolver {
     const pool = Inventory.memory.filter(p => {
         if (settings.untradOnly && p.tradable === true) return false;
         if (settings.excludedLeagues.includes(p.leagueId!)) return false;
-        if (p.rating >= 83 && p._sourceType !== 'storage') return false;
+        // Strictly cap at 82 for League SBCs to protect high-rated fodder
+        if (p.rating > 82) return false;
         if (globalLeagues.length > 0 && !globalLeagues.includes(p.leagueId!)) return false;
         const isStandard = p.rareflag === 0 || p.rareflag === 1 || (isTotwReq && (p.rarityId === 3 || p.rareflag === 3));
         if (!isStandard) return false;

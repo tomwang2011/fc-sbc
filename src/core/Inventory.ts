@@ -49,12 +49,15 @@ export class Inventory {
       items.forEach((p: any) => {
         if (p && p.id && !allPlayers.has(p.id)) {
           const isEvo = !!p.evolutionInfo || p.rareflag === 116 || p.upgrades !== null;
-          if (p.limitedUseType === 2 || isEvo) return;
+          // Exclude Loans (limitedUseType 2), Evos, and Unassigned items
+          if (p.limitedUseType === 2 || isEvo || source === 'unassigned') {
+            if (source === 'unassigned') unassignedCount++;
+            return;
+          }
           p._sourceType = source;
-          p._sourcePriority = (source === 'storage' ? 0 : (source === 'unassigned' ? 1 : 2));
+          p._sourcePriority = (source === 'storage' ? 0 : 2);
           p._personaId = Number(p.definitionId) % 16777216;
           if (source === 'storage') storageCount++;
-          if (source === 'unassigned') unassignedCount++;
           allPlayers.set(p.id, p);
         }
       });
