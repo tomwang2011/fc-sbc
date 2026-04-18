@@ -30,8 +30,17 @@ export class ChallengeSolver {
             if (key === 25 && vals.includes(4)) constraints.minRare = r.count;
 
             // Diversity Mapping (Semantic)
-            if (key === 5 && r.scope === 1) constraints.maxSameNation = vals[0];
-            if (key === 6 && r.scope === 1) constraints.maxSameLeague = vals[0];
+            if (key === 5) {
+                if (r.scope === 1) constraints.maxSameNation = vals[0];
+                else constraints.maxTotalNations = vals[0];
+            }
+            if (key === 6) {
+                if (r.scope === 1) constraints.maxSameLeague = vals[0];
+                else constraints.maxTotalLeagues = vals[0];
+            }
+            if (key === 7) {
+                constraints.maxSameClub = vals[0];
+            }
             if (key === 9 && vals[0] === -1) constraints.maxTotalNations = r.count;
             if (key === 10 && vals[0] === -1) constraints.maxTotalLeagues = r.count;
 
@@ -96,6 +105,7 @@ export class ChallengeSolver {
             if (!currentLeagues.has(p.leagueId) && currentLeagues.size >= constraints.maxTotalLeagues) return false;
 
             // Same Entity Limits check (Per-nation/per-league count)
+            if ((counts.club[p.teamId!] || 0) >= constraints.maxSameClub) return false;
             if ((counts.nation[p.nationId!] || 0) >= constraints.maxSameNation) return false;
             if ((counts.league[p.leagueId!] || 0) >= (p.leagueId === lid ? 11 : constraints.maxSameLeague)) return false;
 

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC SBC Enhanced Builder
 // @namespace    fc-sbc-builder
-// @version      1.0.26
+// @version      1.0.27
 // @author       tomwang
 // @description  Optimal SBC builder with Storage-First priority
 // @license      ISC
@@ -917,6 +917,7 @@
       const { challenge, squad, controller } = ctx;
       log("Analyzing Complex Constraints...");
       const constraints = {
+        maxSameClub: 11,
         maxSameNation: 11,
         maxSameLeague: 11,
         maxTotalNations: 11,
@@ -937,8 +938,17 @@
           if (key === 35 || key === 20) constraints.targetChem = Math.max(constraints.targetChem, vals[0] || 0);
           if (key === 17 && vals.includes(3)) constraints.minGold = r2.count;
           if (key === 25 && vals.includes(4)) constraints.minRare = r2.count;
-          if (key === 5 && r2.scope === 1) constraints.maxSameNation = vals[0];
-          if (key === 6 && r2.scope === 1) constraints.maxSameLeague = vals[0];
+          if (key === 5) {
+            if (r2.scope === 1) constraints.maxSameNation = vals[0];
+            else constraints.maxTotalNations = vals[0];
+          }
+          if (key === 6) {
+            if (r2.scope === 1) constraints.maxSameLeague = vals[0];
+            else constraints.maxTotalLeagues = vals[0];
+          }
+          if (key === 7) {
+            constraints.maxSameClub = vals[0];
+          }
           if (key === 9 && vals[0] === -1) constraints.maxTotalNations = r2.count;
           if (key === 10 && vals[0] === -1) constraints.maxTotalLeagues = r2.count;
           if (key === 14) vals.forEach((id) => hardReqs.push({ type: "club", id, count: r2.count || 1 }));
@@ -990,6 +1000,7 @@
           const currentLeagues = new Set(selected.filter((x2) => x2).map((x2) => x2.leagueId));
           if (!currentNations.has(p2.nationId) && currentNations.size >= constraints.maxTotalNations) return false;
           if (!currentLeagues.has(p2.leagueId) && currentLeagues.size >= constraints.maxTotalLeagues) return false;
+          if ((counts.club[p2.teamId] || 0) >= constraints.maxSameClub) return false;
           if ((counts.nation[p2.nationId] || 0) >= constraints.maxSameNation) return false;
           if ((counts.league[p2.leagueId] || 0) >= (p2.leagueId === lid ? 11 : constraints.maxSameLeague)) return false;
           const slotsLeft = 11 - slotIdx - 1;
@@ -1230,7 +1241,7 @@ u$1(
               className: "animate-in slide-in-from-left-4 fade-in duration-300",
               children: [
 u$1("div", { className: "flex justify-between items-center mb-6", children: [
-u$1("h2", { className: "text-xs font-black text-white tracking-widest uppercase opacity-60", children: "SBC Master V1.0.26" }),
+u$1("h2", { className: "text-xs font-black text-white tracking-widest uppercase opacity-60", children: "SBC Master V1.0.27" }),
 u$1(
                     "button",
                     {
