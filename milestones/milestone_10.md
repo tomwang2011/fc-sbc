@@ -10,20 +10,25 @@ Unlike League SBCs (specific league) or De-Cloggers (specific rating), MM SBCs h
 3.  **Limits:** "Max 5 players from the Same Nation"
 4.  **Thresholds:** "Min Team Chemistry: 14", "Min Squad Rating: 75"
 
-## The Architecture: A 3-Phase Constraint Engine
+## The Architecture: A 4-Phase Constraint Engine
 
 ### Phase 1: The Core Requirements (The "Seeds")
-- Identify "Specific Entity" requirements (Rule Key 14 for Club, 15 for Nation, etc.).
-- Perform targeted discovery searches for these specific players.
+- Identify "Specific Entity" requirements (Clubs, Nations, Leagues).
+- Perform targeted discovery searches for these players.
 - Insert these "Seed" players first to guarantee the most difficult rules are met.
 
-### Phase 2: The Diversity Expansion (The "Fillers")
-- Analyze diversity rules (Min Leagues/Nations) and limit rules (Max Same League/Nation).
-- Select fillers using a `isMoveValid()` validator that ensures inserting a player won't violate any limits or make diversity rules impossible to hit.
+### Phase 2: Core League Identification (The "Chem Engine")
+- Analyze the inventory pool to find the "Abundant League"—the league with the highest count of low-rated untradeable players that doesn't violate the SBC's max-constraints.
+- This league will serve as the "Chemistry Core."
 
-### Phase 3: The Optimization Bridge (Rating & Chem)
-- **Chemistry Sniping:** Swap non-seed players with position-matching players from the same League/Nation as the seeds.
-- **Rating Bridge:** Upgrade lowest-rated non-seed players to hit the target OVR while respecting the `rareflag` quality gate.
+### Phase 3: Targeted Filling
+- Attempt to fill empty slots using players from the "Abundant League" to maximize chemistry.
+- For each insertion, perform a real-time `isMoveValid()` check to ensure diversity rules (e.g., Max 4 from same club) aren't broken.
+
+### Phase 4: The Optimization Bridge (Rating & Chem)
+- **Position Shuffle:** Shuffle the 11 selected players across slots to find the highest chemistry configuration.
+- **Rating Bridge:** Iteratively upgrade or downgrade players to hit the target OVR exactly, prioritizing fodder conservation.
+
 
 ## Implementation Steps
 - [ ] Map complex rule keys (Min Leagues, Max Nations, etc.) via diagnostic logs.

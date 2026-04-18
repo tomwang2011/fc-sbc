@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC SBC Enhanced Builder
 // @namespace    fc-sbc-builder
-// @version      1.0.21
+// @version      1.0.22
 // @author       tomwang
 // @description  Optimal SBC builder with Storage-First priority
 // @license      ISC
@@ -896,8 +896,6 @@
       const { challenge, squad, controller } = ctx;
       log("Analyzing Complex Constraints...");
       const constraints = {
-        maxSameNation: 11,
-        maxSameLeague: 11,
         maxTotalNations: 11,
         maxTotalLeagues: 11,
         minGold: 0,
@@ -905,6 +903,7 @@
         targetRating: 0,
         targetChem: 0
       };
+      const hardReqs = [];
       (challenge.eligibilityRequirements || []).forEach((r2) => {
         const col = r2.kvPairs._collection || r2.kvPairs;
         const keys = Object.keys(col).map((k2) => parseInt(k2));
@@ -913,14 +912,17 @@
         if (keys.includes(35)) constraints.targetChem = Math.max(constraints.targetChem, vals[0] || 0);
         if (keys.includes(17) && (vals.includes(3) || vals.includes(17))) constraints.minGold = r2.count;
         if (keys.includes(25) && (vals.includes(4) || vals.includes(25))) constraints.minRare = r2.count;
-        if (keys.includes(15) || keys.includes(5)) {
+        if (keys.includes(14)) vals.forEach((id) => hardReqs.push({ type: "club", id, count: r2.count || 1 }));
+        if (keys.includes(5)) vals.forEach((id) => hardReqs.push({ type: "nation", id, count: r2.count || 1 }));
+        if (keys.includes(6)) vals.forEach((id) => hardReqs.push({ type: "league", id, count: r2.count || 1 }));
+        if (keys.includes(15)) {
           if (r2.count > 0 && r2.count < 11) constraints.maxTotalNations = Math.min(constraints.maxTotalNations, r2.count);
         }
-        if (keys.includes(12) || keys.includes(6)) {
+        if (keys.includes(12)) {
           if (r2.count > 0 && r2.count < 11) constraints.maxTotalLeagues = Math.min(constraints.maxTotalLeagues, r2.count);
         }
       });
-      log(`Targets: ${constraints.targetChem} Chem | ${constraints.minGold} Gold`);
+      log(`Targets: ${constraints.targetChem} Chem | ${constraints.minGold} Gold | ${hardReqs.length} Hard Reqs`);
       log("Performing Multi-Pass Sync...");
       await Promise.all([
         Inventory.fetchItems({ count: 250 }),
@@ -956,32 +958,39 @@
         const usedIds = new Set();
         const usedPersonaIds = new Set();
         const counts = { club: {}, nation: {}, league: {}, gold: 0, rare: 0 };
+        const fulfilled = { club: {}, nation: {}, league: {} };
         let iterations = 0;
         const isValid = (p2, slotIdx) => {
           if (usedIds.has(p2.id) || usedPersonaIds.has(p2._personaId)) return false;
-          if ((counts.club[p2.teamId] || 0) >= 4) return false;
-          if ((counts.nation[p2.nationId] || 0) >= constraints.maxSameNation) return false;
-          if ((counts.league[p2.leagueId] || 0) >= (p2.leagueId === lid ? 11 : constraints.maxSameLeague)) return false;
           const slotsLeft = 11 - slotIdx - 1;
+          for (const req of hardReqs) {
+            const current = fulfilled[req.type][req.id] || 0;
+            const needed = req.count - current;
+            if (needed > slotsLeft + 1) return false;
+          }
           if (counts.gold < constraints.minGold && constraints.minGold - counts.gold > slotsLeft + (p2.rating >= 75 ? 1 : 0)) return false;
           if (counts.rare < constraints.minRare && constraints.minRare - counts.rare > slotsLeft + (p2.rareflag === 1 ? 1 : 0)) return false;
           return true;
         };
-        const sortedPool = [...pool].sort((a2, b2) => {
-          const aMatch = a2.leagueId === lid || a2.nationId === nid ? 0 : 1;
-          const bMatch = b2.leagueId === lid || b2.nationId === nid ? 0 : 1;
-          return aMatch - bMatch || a2.rating - b2.rating;
-        });
         const solve = (idx) => {
           iterations++;
-          if (iterations > 2e3) return false;
+          if (iterations > 3e3) return false;
           if (idx === 11) return true;
           const slotPos = Utils.normalizePos(activeSlots[idx].position?.id || activeSlots[idx]._position);
-          const candidates = sortedPool.filter((p2) => isValid(p2, idx)).sort((a2, b2) => {
-            const aPosMatch = Utils.normalizePos(a2.preferredPosition) === slotPos ? 0 : 1;
-            const bPosMatch = Utils.normalizePos(b2.preferredPosition) === slotPos ? 0 : 1;
-            return aPosMatch - bPosMatch;
-          }).slice(0, 8);
+          const candidates = pool.filter((p2) => isValid(p2, idx)).map((p2) => {
+            let score = 0;
+            hardReqs.forEach((req) => {
+              const current = fulfilled[req.type][req.id] || 0;
+              if (current < req.count) {
+                if (req.type === "club" && p2.teamId === req.id) score += 2e3;
+                if (req.type === "nation" && p2.nationId === req.id) score += 1e3;
+                if (req.type === "league" && p2.leagueId === req.id) score += 500;
+              }
+            });
+            if (p2.leagueId === lid || p2.nationId === nid) score += 50;
+            if (Utils.normalizePos(p2.preferredPosition) === slotPos) score += 100;
+            return { p: p2, score };
+          }).sort((a2, b2) => b2.score - a2.score || a2.p.rating - b2.p.rating).slice(0, 10).map((c2) => c2.p);
           for (const p2 of candidates) {
             selected[idx] = p2;
             usedIds.add(p2.id);
@@ -991,6 +1000,11 @@
             counts.league[p2.leagueId] = (counts.league[p2.leagueId] || 0) + 1;
             if (p2.rating >= 75) counts.gold++;
             if (p2.rareflag === 1) counts.rare++;
+            hardReqs.forEach((req) => {
+              if (req.type === "club" && p2.teamId === req.id) fulfilled.club[req.id] = (fulfilled.club[req.id] || 0) + 1;
+              if (req.type === "nation" && p2.nationId === req.id) fulfilled.nation[req.id] = (fulfilled.nation[req.id] || 0) + 1;
+              if (req.type === "league" && p2.leagueId === req.id) fulfilled.league[req.id] = (fulfilled.league[req.id] || 0) + 1;
+            });
             if (solve(idx + 1)) return true;
             selected[idx] = null;
             usedIds.delete(p2.id);
@@ -1000,6 +1014,11 @@
             counts.league[p2.leagueId]--;
             if (p2.rating >= 75) counts.gold--;
             if (p2.rareflag === 1) counts.rare--;
+            hardReqs.forEach((req) => {
+              if (req.type === "club" && p2.teamId === req.id) fulfilled.club[req.id]--;
+              if (req.type === "nation" && p2.nationId === req.id) fulfilled.nation[req.id]--;
+              if (req.type === "league" && p2.leagueId === req.id) fulfilled.league[req.id]--;
+            });
           }
           return false;
         };
@@ -1181,7 +1200,7 @@ u$1(
               className: "animate-in slide-in-from-left-4 fade-in duration-300",
               children: [
 u$1("div", { className: "flex justify-between items-center mb-6", children: [
-u$1("h2", { className: "text-xs font-black text-white tracking-widest uppercase opacity-60", children: "SBC Master V1.0.21" }),
+u$1("h2", { className: "text-xs font-black text-white tracking-widest uppercase opacity-60", children: "SBC Master V1.0.22" }),
 u$1(
                     "button",
                     {

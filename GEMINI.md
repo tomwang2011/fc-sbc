@@ -22,7 +22,10 @@ All solver implementations (League, De-Clogger, Efficient) MUST implement these 
 -   **Liquid Asset Protection:** Strictly use `p.tradable === false` across all fillers.
 -   **Special Card Safeguard:** Only allow Standard (Gold/Silver/Bronze) and TOTW (`p.rareflag === 0 || 1 || 3`).
 -   **Evo Protection:** Explicitly block cards with `evolutionInfo`, `upgrades !== null`, or `rareflag === 116`.
--   **Meticulous Logging:** Log every slot insertion with: `[DECISION] Slot X: [Name] ([Rating]) [Source: Storage/Club/Failsafe] [Persona ID]`.
+-   **Meticulous Logging:** 
+    - Log every slot insertion with: `[DECISION] Slot X: [Name] ([Rating]) [Source: Storage/Club/Failsafe]`.
+    - For backtracking solvers, log every successful branch: `[GROW] Trial [Anchor]: Depth X/11. Added [Name] ([Rating])`.
+    - If a branch reaches 11/11 but fails validation, log the reason: `[REJECT] Trial [Anchor]: Rating [Actual/Target], Chem [Actual/Target], Nations [Actual/Limit]`.
 
 ## 4. UI Standards
 -   **Opaque Theme:** Always use solid hex backgrounds (`#09090b`, `#18181b`) with `!important` or high-priority inline styles to ensure mobile readability.

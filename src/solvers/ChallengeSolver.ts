@@ -14,6 +14,8 @@ export class ChallengeSolver {
         maxTotalNations: 11, maxTotalLeagues: 11,
         minGold: 0, minRare: 0, targetRating: 0, targetChem: 0
     };
+    
+    const hardReqs: { type: 'club' | 'nation' | 'league', id: number, count: number }[] = [];
 
     (challenge.eligibilityRequirements || []).forEach((r: any) => {
         const col = r.kvPairs._collection || r.kvPairs;
@@ -25,16 +27,21 @@ export class ChallengeSolver {
         if (keys.includes(17) && (vals.includes(3) || vals.includes(17))) constraints.minGold = r.count;
         if (keys.includes(25) && (vals.includes(4) || vals.includes(25))) constraints.minRare = r.count;
 
+        // Specific Entity Requirements (Seeds)
+        if (keys.includes(14)) vals.forEach(id => hardReqs.push({ type: 'club', id, count: r.count || 1 }));
+        if (keys.includes(5)) vals.forEach(id => hardReqs.push({ type: 'nation', id, count: r.count || 1 }));
+        if (keys.includes(6)) vals.forEach(id => hardReqs.push({ type: 'league', id, count: r.count || 1 }));
+
         // Diversity/Limits
-        if (keys.includes(15) || keys.includes(5)) {
+        if (keys.includes(15)) {
             if (r.count > 0 && r.count < 11) constraints.maxTotalNations = Math.min(constraints.maxTotalNations, r.count);
         }
-        if (keys.includes(12) || keys.includes(6)) {
+        if (keys.includes(12)) {
             if (r.count > 0 && r.count < 11) constraints.maxTotalLeagues = Math.min(constraints.maxTotalLeagues, r.count);
         }
     });
 
-    log(`Targets: ${constraints.targetChem} Chem | ${constraints.minGold} Gold`);
+    log(`Targets: ${constraints.targetChem} Chem | ${constraints.minGold} Gold | ${hardReqs.length} Hard Reqs`);
 
     log("Performing Multi-Pass Sync...");
     await Promise.all([
@@ -74,39 +81,50 @@ export class ChallengeSolver {
         const selected: (EAItem | null)[] = new Array(11).fill(null);
         const usedIds = new Set<number>(); const usedPersonaIds = new Set<number>();
         const counts: any = { club: {}, nation: {}, league: {}, gold: 0, rare: 0 };
+        const fulfilled = { club: {} as any, nation: {} as any, league: {} as any };
         let iterations = 0;
 
         const isValid = (p: EAItem, slotIdx: number) => {
             if (usedIds.has(p.id) || usedPersonaIds.has(p._personaId!)) return false;
-            // Basic limits
-            if ((counts.club[p.teamId!] || 0) >= 4) return false; // Default club limit
-            if ((counts.nation[p.nationId!] || 0) >= constraints.maxSameNation) return false;
-            if ((counts.league[p.leagueId!] || 0) >= (p.leagueId === lid ? 11 : constraints.maxSameLeague)) return false;
             
             const slotsLeft = 11 - slotIdx - 1;
+            
+            // Hard req pruning
+            for (const req of hardReqs) {
+                const current = (fulfilled as any)[req.type][req.id] || 0;
+                const needed = req.count - current;
+                if (needed > slotsLeft + 1) return false;
+            }
+
             if (counts.gold < constraints.minGold && (constraints.minGold - counts.gold) > slotsLeft + (p.rating >= 75 ? 1 : 0)) return false;
             if (counts.rare < constraints.minRare && (constraints.minRare - counts.rare) > slotsLeft + (p.rareflag === 1 ? 1 : 0)) return false;
             return true;
         };
 
-        const sortedPool = [...pool].sort((a,b) => {
-            const aMatch = (a.leagueId === lid || a.nationId === nid) ? 0 : 1;
-            const bMatch = (b.leagueId === lid || b.nationId === nid) ? 0 : 1;
-            return aMatch - bMatch || (a.rating - b.rating);
-        });
-
         const solve = (idx: number): boolean => {
-            iterations++; if (iterations > 2000) return false;
+            iterations++; if (iterations > 3000) return false;
             if (idx === 11) return true;
             const slotPos = Utils.normalizePos(activeSlots[idx].position?.id || activeSlots[idx]._position);
             
-            const candidates = sortedPool.filter(p => isValid(p, idx))
-                .sort((a,b) => {
-                    const aPosMatch = Utils.normalizePos(a.preferredPosition) === slotPos ? 0 : 1;
-                    const bPosMatch = Utils.normalizePos(b.preferredPosition) === slotPos ? 0 : 1;
-                    return aPosMatch - bPosMatch;
+            // Heuristic Scoring
+            const candidates = pool.filter(p => isValid(p, idx))
+                .map(p => {
+                    let score = 0;
+                    hardReqs.forEach(req => {
+                        const current = (fulfilled as any)[req.type][req.id] || 0;
+                        if (current < req.count) {
+                            if (req.type === 'club' && p.teamId === req.id) score += 2000;
+                            if (req.type === 'nation' && p.nationId === req.id) score += 1000;
+                            if (req.type === 'league' && p.leagueId === req.id) score += 500;
+                        }
+                    });
+                    if (p.leagueId === lid || p.nationId === nid) score += 50;
+                    if (Utils.normalizePos(p.preferredPosition) === slotPos) score += 100;
+                    return { p, score };
                 })
-                .slice(0, 8);
+                .sort((a,b) => b.score - a.score || (a.p.rating - b.p.rating))
+                .slice(0, 10)
+                .map(c => c.p);
             
             for (const p of candidates) {
                 selected[idx] = p; usedIds.add(p.id); usedPersonaIds.add(p._personaId!);
@@ -114,12 +132,25 @@ export class ChallengeSolver {
                 counts.nation[p.nationId!] = (counts.nation[p.nationId!] || 0) + 1;
                 counts.league[p.leagueId!] = (counts.league[p.leagueId!] || 0) + 1;
                 if (p.rating >= 75) counts.gold++; if (p.rareflag === 1) counts.rare++;
+                
+                // Track fulfilled hard reqs
+                hardReqs.forEach(req => {
+                    if (req.type === 'club' && p.teamId === req.id) fulfilled.club[req.id] = (fulfilled.club[req.id] || 0) + 1;
+                    if (req.type === 'nation' && p.nationId === req.id) fulfilled.nation[req.id] = (fulfilled.nation[req.id] || 0) + 1;
+                    if (req.type === 'league' && p.leagueId === req.id) fulfilled.league[req.id] = (fulfilled.league[req.id] || 0) + 1;
+                });
 
                 if (solve(idx + 1)) return true;
 
                 selected[idx] = null; usedIds.delete(p.id); usedPersonaIds.delete(p._personaId!);
                 counts.club[p.teamId!]--; counts.nation[p.nationId!]--; counts.league[p.leagueId!]--;
                 if (p.rating >= 75) counts.gold--; if (p.rareflag === 1) counts.rare--;
+                
+                hardReqs.forEach(req => {
+                    if (req.type === 'club' && p.teamId === req.id) fulfilled.club[req.id]--;
+                    if (req.type === 'nation' && p.nationId === req.id) fulfilled.nation[req.id]--;
+                    if (req.type === 'league' && p.leagueId === req.id) fulfilled.league[req.id]--;
+                });
             }
             return false;
         };
