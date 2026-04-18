@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC SBC Enhanced Builder
 // @namespace    fc-sbc-builder
-// @version      1.0.22
+// @version      1.0.23
 // @author       tomwang
 // @description  Optimal SBC builder with Storage-First priority
 // @license      ISC
@@ -766,9 +766,21 @@
             usedIds.add(p2.id);
             usedPersonaIds.add(p2._personaId);
             count++;
-            console.log(`[DECISION] Pattern Slot: ${p2._staticData?.name} (${p2.rating})`);
+            console.log(`[DECISION] Pattern Slot (Exact): ${p2._staticData?.name} (${p2.rating})`);
           }
         });
+        if (count < pReq.c && pReq.r === 83) {
+          pool.filter((p2) => p2.rating === 84 && p2.rareflag <= 1).forEach((p2) => {
+            const idx = selected.findIndex((s2) => s2 === null);
+            if (count < pReq.c && idx !== -1 && !usedIds.has(p2.id) && !usedPersonaIds.has(p2._personaId)) {
+              selected[idx] = p2;
+              usedIds.add(p2.id);
+              usedPersonaIds.add(p2._personaId);
+              count++;
+              console.log(`[DECISION] Pattern Slot (Failsafe 84): ${p2._staticData?.name} (${p2.rating})`);
+            }
+          });
+        }
       });
       activeSlots.forEach((slot, i2) => {
         if (selected[i2]) return;
@@ -1200,7 +1212,7 @@ u$1(
               className: "animate-in slide-in-from-left-4 fade-in duration-300",
               children: [
 u$1("div", { className: "flex justify-between items-center mb-6", children: [
-u$1("h2", { className: "text-xs font-black text-white tracking-widest uppercase opacity-60", children: "SBC Master V1.0.22" }),
+u$1("h2", { className: "text-xs font-black text-white tracking-widest uppercase opacity-60", children: "SBC Master V1.0.23" }),
 u$1(
                     "button",
                     {

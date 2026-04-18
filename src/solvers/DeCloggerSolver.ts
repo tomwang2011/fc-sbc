@@ -71,13 +71,25 @@ export class DeCloggerSolver {
 
     pattern.forEach(pReq => {
         let count = 0;
+        // Primary fill: exactly matching the target rating
         pool.filter(p => p.rating === pReq.r && p.rareflag <= 1).forEach(p => {
             const idx = selected.findIndex(s => s === null);
             if (count < pReq.c && idx !== -1 && !usedIds.has(p.id) && !usedPersonaIds.has(p._personaId!)) {
                 selected[idx] = p; usedIds.add(p.id); usedPersonaIds.add(p._personaId!); count++;
-                console.log(`[DECISION] Pattern Slot: ${p._staticData?.name} (${p.rating})`);
+                console.log(`[DECISION] Pattern Slot (Exact): ${p._staticData?.name} (${p.rating})`);
             }
         });
+        
+        // Failsafe fill: if we still need more and it's an 83 pattern, try 84s
+        if (count < pReq.c && pReq.r === 83) {
+            pool.filter(p => p.rating === 84 && p.rareflag <= 1).forEach(p => {
+                const idx = selected.findIndex(s => s === null);
+                if (count < pReq.c && idx !== -1 && !usedIds.has(p.id) && !usedPersonaIds.has(p._personaId!)) {
+                    selected[idx] = p; usedIds.add(p.id); usedPersonaIds.add(p._personaId!); count++;
+                    console.log(`[DECISION] Pattern Slot (Failsafe 84): ${p._staticData?.name} (${p.rating})`);
+                }
+            });
+        }
     });
 
     // 3. Failsafe remainder
