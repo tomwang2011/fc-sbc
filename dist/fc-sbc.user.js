@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC SBC Enhanced Builder
 // @namespace    fc-sbc-builder
-// @version      1.0.17
+// @version      1.0.18
 // @author       tomwang
 // @description  Optimal SBC builder with Storage-First priority
 // @license      ISC
@@ -429,6 +429,63 @@
   function D(n2, t2) {
     return "function" == typeof t2 ? t2(n2) : t2;
   }
+  class Utils {
+    static getSbcContext() {
+      const win = typeof unsafeWindow !== "undefined" ? unsafeWindow : window;
+      try {
+        const root = win.getAppMain().getRootViewController();
+        const find = (n2) => {
+          if (!n2) return null;
+          if (n2._squad && n2._challenge) return n2;
+          const kids = [...n2.childViewControllers || [], ...n2.presentedViewController ? [n2.presentedViewController] : [], ...n2.currentController ? [n2.currentController] : [], ...n2._viewControllers || []];
+          for (const k2 of kids) {
+            const r2 = find(k2);
+            if (r2) return r2;
+          }
+          return null;
+        };
+        const controller = find(root);
+        return controller ? { challenge: controller._challenge, squad: controller._squad, controller } : null;
+      } catch (e2) {
+        return null;
+      }
+    }
+    static getCleanValue(val) {
+      if (Array.isArray(val)) return val.map((v2) => v2?.value !== void 0 ? v2.value : v2);
+      return val?.value !== void 0 ? val.value : val;
+    }
+    static calculateRating(items) {
+      const active = items.filter((p2) => p2 !== null);
+      if (active.length < 11) return 0;
+      const ratings = active.map((p2) => p2.rating);
+      const sum = ratings.reduce((a2, b2) => a2 + b2, 0);
+      const avg = sum / 11;
+      let cf = 0;
+      ratings.forEach((r2) => {
+        if (r2 > avg) cf += r2 - avg;
+      });
+      return Math.floor((sum + cf) / 11 + 0.0401);
+    }
+    static normalizePos(id) {
+      if (!id && id !== 0) return null;
+      const rawId = typeof id === "object" ? id.id : id;
+      const map = { 2: 3, 8: 7, 4: 5, 6: 5, 9: 10, 11: 10, 13: 14, 15: 14, 17: 18, 19: 18, 20: 21, 22: 21, 24: 25, 26: 25 };
+      return map[rawId] || rawId;
+    }
+    static async saveSquad(challenge, squad, controller) {
+      const win = typeof unsafeWindow !== "undefined" ? unsafeWindow : window;
+      challenge.squad = squad;
+      return new Promise((resolve) => {
+        win.services.SBC.saveChallenge(challenge).observe({ name: "Save" }, (obs, res) => {
+          squad.onDataUpdated.notify();
+          if (squad.isValid) squad.isValid();
+          if (controller._pushSquadToView) controller._pushSquadToView(squad);
+          else if (controller._overviewController?._pushSquadToView) controller._overviewController._pushSquadToView(squad);
+          resolve(res.success);
+        });
+      });
+    }
+  }
   class Inventory {
     static _clubPlayersMemory = [];
     static get memory() {
@@ -494,136 +551,152 @@
       return { total: this._clubPlayersMemory.length, storage: storageCount, unassigned: unassignedCount };
     }
   }
-  class Utils {
-    static getSbcContext() {
-      const win = typeof unsafeWindow !== "undefined" ? unsafeWindow : window;
-      try {
-        const root = win.getAppMain().getRootViewController();
-        const find = (n2) => {
-          if (!n2) return null;
-          if (n2._squad && n2._challenge) return n2;
-          const kids = [...n2.childViewControllers || [], ...n2.presentedViewController ? [n2.presentedViewController] : [], ...n2.currentController ? [n2.currentController] : [], ...n2._viewControllers || []];
-          for (const k2 of kids) {
-            const r2 = find(k2);
-            if (r2) return r2;
-          }
-          return null;
-        };
-        const controller = find(root);
-        return controller ? { challenge: controller._challenge, squad: controller._squad, controller } : null;
-      } catch (e2) {
-        return null;
-      }
-    }
-    static getCleanValue(val) {
-      if (Array.isArray(val)) return val.map((v2) => v2?.value !== void 0 ? v2.value : v2);
-      return val?.value !== void 0 ? val.value : val;
-    }
-    static calculateRating(items) {
-      const active = items.filter((p2) => p2 !== null);
-      if (active.length < 11) return 0;
-      const ratings = active.map((p2) => p2.rating);
-      const sum = ratings.reduce((a2, b2) => a2 + b2, 0);
-      const avg = sum / 11;
-      let cf = 0;
-      ratings.forEach((r2) => {
-        if (r2 > avg) cf += r2 - avg;
-      });
-      return Math.floor((sum + cf) / 11 + 0.0401);
-    }
-    static normalizePos(id) {
-      if (!id && id !== 0) return null;
-      const rawId = typeof id === "object" ? id.id : id;
-      const map = { 2: 3, 8: 7, 4: 5, 6: 5, 9: 10, 11: 10, 13: 14, 15: 14, 17: 18, 19: 18, 20: 21, 22: 21, 24: 25, 26: 25 };
-      return map[rawId] || rawId;
-    }
-    static async saveSquad(challenge, squad, controller) {
-      const win = typeof unsafeWindow !== "undefined" ? unsafeWindow : window;
-      challenge.squad = squad;
-      return new Promise((resolve) => {
-        win.services.SBC.saveChallenge(challenge).observe({ name: "Save" }, (obs, res) => {
-          squad.onDataUpdated.notify();
-          if (squad.isValid) squad.isValid();
-          if (controller._pushSquadToView) controller._pushSquadToView(squad);
-          else if (controller._overviewController?._pushSquadToView) controller._overviewController._pushSquadToView(squad);
-          resolve(res.success);
-        });
-      });
-    }
-  }
-  class EfficientSolver {
+  class LeagueSolver {
     static async solve(log, settings) {
       const ctx = Utils.getSbcContext();
       if (!ctx) return log("❌ SBC Screen Not Found");
       const { challenge, squad, controller } = ctx;
       log("Analyzing Requirements...");
       const rawReqs = challenge.eligibilityRequirements || [];
-      let minRaresNeeded = 0;
-      const buckets = [];
-      let globalLevel = null;
-      const levelsToDiscover = new Set();
+      let targetRating = 0;
+      let targetChem = 0;
+      let isTotwReq = false;
+      const detectedLeagues = new Set();
       rawReqs.forEach((r2) => {
-        const rules = [];
         const col = r2.kvPairs._collection || r2.kvPairs;
-        for (let k2 in col) rules.push({ key: parseInt(k2), value: Utils.getCleanValue(col[k2]) });
-        const isRare = rules.some((rl) => rl.key === 25 && rl.value.includes(4) || rl.key === 18 && rl.value.includes(1));
-        if (isRare) minRaresNeeded = Math.max(minRaresNeeded, r2.count || 0);
-        const bronze = rules.some((rl) => rl.key === 17 && rl.value.includes(1) || rl.key === 3 && rl.value.includes(1));
-        const silver = rules.some((rl) => rl.key === 17 && rl.value.includes(2) || rl.key === 3 && rl.value.includes(2));
-        const gold = rules.some((rl) => rl.key === 17 && rl.value.includes(3) || rl.key === 3 && rl.value.includes(3));
-        const bInfo = bronze ? { level: "bronze", min: 0, max: 64 } : silver ? { level: "silver", min: 65, max: 74 } : gold ? { level: "gold", min: 75, max: 82 } : null;
-        if (bInfo) {
-          levelsToDiscover.add(bInfo.level);
-          if (r2.count > 0) buckets.push({ ...bInfo, count: r2.count });
-          else if (r2.count === -1) globalLevel = bInfo;
+        for (let k2 in col) {
+          const val = Utils.getCleanValue(col[k2]);
+          const key = parseInt(k2);
+          if (key === 19) targetRating = Math.max(targetRating, Number(Array.isArray(val) ? val[0] : val) || 0);
+          if (key === 35) targetChem = Math.max(targetChem, Number(Array.isArray(val) ? val[0] : val) || 0);
+          if (key === 11) (Array.isArray(val) ? val : [val]).forEach((l2) => detectedLeagues.add(l2));
+          if (key === 18 && val.includes(3)) isTotwReq = true;
         }
       });
-      if (buckets.length === 0 && !globalLevel) globalLevel = { level: "gold", min: 75, max: 82 };
-      if (Inventory.memory.length === 0) await Inventory.primeInventory(Array.from(levelsToDiscover));
+      log(`Target: ${targetRating} OVR | Chem: ${targetChem}`);
+      const discoveryLeagues = Array.from(detectedLeagues).slice(0, 3);
+      await Promise.all(discoveryLeagues.map((l2) => Inventory.fetchItems({ league: l2, count: 250 })));
+      await Inventory.primeInventory();
+      const globalLeagues = Array.from(detectedLeagues);
       const pool = Inventory.memory.filter((p2) => {
         if (settings.untradOnly && p2.tradable === true) return false;
         if (settings.excludedLeagues.includes(p2.leagueId)) return false;
-        const isStandard = p2.rareflag === 0 || p2.rareflag === 1;
+        if (p2.rating >= 83 && p2._sourceType !== "storage") return false;
+        if (globalLeagues.length > 0 && !globalLeagues.includes(p2.leagueId)) return false;
+        const isStandard = p2.rareflag === 0 || p2.rareflag === 1 || isTotwReq && (p2.rarityId === 3 || p2.rareflag === 3);
         if (!isStandard) return false;
         return true;
       }).sort((a2, b2) => a2._sourcePriority - b2._sourcePriority || a2.rating - b2.rating);
       const usedPersonaIds = new Set();
       const usedIds = new Set();
       const activeSlots = squad.getSBCSlots().filter((s2) => !s2.isBrick() && s2.index <= 10);
-      const selected = new Array(activeSlots.length).fill(null);
-      let raresInserted = 0;
-      const findMatch = (lvl, rareflag, ignoreRarity = false) => {
-        return pool.find((p2) => {
-          if (usedIds.has(p2.id) || usedPersonaIds.has(p2._personaId)) return false;
-          if (p2.rating < lvl.min || p2.rating > (lvl.level === "gold" ? 82 : lvl.max)) return false;
-          if (!ignoreRarity && p2.rareflag !== rareflag) return false;
-          return true;
-        });
-      };
-      [...buckets, ...globalLevel ? [{ ...globalLevel, count: 11 }] : []].forEach((bucket) => {
-        let count = 0;
-        const targetCount = bucket.count === 11 || bucket.count === -1 ? activeSlots.length : bucket.count;
+      let selected = new Array(activeSlots.length).fill(null);
+      const getChem = (items) => {
+        const tempPlayers = new Array(23).fill(null);
         activeSlots.forEach((slot, i2) => {
-          if (selected[i2] || count >= targetCount) return;
-          let match = raresInserted < minRaresNeeded ? findMatch(bucket, 1) : findMatch(bucket, 0, bucket.level !== "gold");
-          if (!match) match = findMatch(bucket, 0, true);
+          if (items[i2]) tempPlayers[slot.index] = items[i2];
+        });
+        squad.setPlayers(tempPlayers);
+        return squad.getChemistry();
+      };
+      const fillPass = (source, matchPos) => {
+        activeSlots.forEach((slot, i2) => {
+          if (selected[i2]) return;
+          if (matchPos && targetChem > 0 && getChem(selected) >= targetChem) return;
+          const slotPos = Utils.normalizePos(slot.position?.id || slot._position);
+          const match = pool.find((p2) => {
+            if (usedIds.has(p2.id) || usedPersonaIds.has(p2._personaId)) return false;
+            if (source && p2._sourceType !== source) return false;
+            if (matchPos && Utils.normalizePos(p2.preferredPosition) !== slotPos) return false;
+            return true;
+          });
           if (match) {
-            console.log(`[DECISION] Slot ${slot.index}: ${match.rareflag ? "RARE" : "COMMON"} ${match._staticData?.name} (${match.rating})`);
             selected[i2] = match;
             usedIds.add(match.id);
             usedPersonaIds.add(match._personaId);
-            count++;
-            if (match.rareflag) raresInserted++;
           }
         });
-      });
+      };
+      fillPass("storage", true);
+      fillPass("club", true);
+      fillPass("storage", false);
+      fillPass("club", false);
+      log("Running Position Re-Optimizer...");
+      const currentItems = selected.filter((s2) => s2);
+      if (currentItems.length === 11) {
+        let maxChem = getChem(selected);
+        for (let i2 = 0; i2 < 11; i2++) {
+          for (let j2 = i2 + 1; j2 < 11; j2++) {
+            const temp = [...selected];
+            [temp[i2], temp[j2]] = [temp[j2], temp[i2]];
+            const newChem = getChem(temp);
+            if (newChem > maxChem) {
+              maxChem = newChem;
+              selected = [...temp];
+              console.log(`[DEEP CHECK] Swapped slots ${i2} & ${j2} for +chem`);
+            }
+          }
+        }
+      }
+      if (targetRating > 0 && Utils.calculateRating(selected) < targetRating) {
+        log(`Increasing rating to ${targetRating}...`);
+        let bridgeAttempts = 0;
+        while (bridgeAttempts < 50 && Utils.calculateRating(selected) < targetRating) {
+          bridgeAttempts++;
+          const clubItems = selected.filter((s2) => s2 && s2._sourceType !== "storage");
+          if (clubItems.length === 0) break;
+          const minR = Math.min(...clubItems.map((s2) => s2.rating));
+          const upIdx = selected.findIndex((s2) => s2 && s2.rating === minR && s2._sourceType !== "storage");
+          if (upIdx === -1) break;
+          const currentItem = selected[upIdx];
+          const slotPos = Utils.normalizePos(activeSlots[upIdx].position?.id || activeSlots[upIdx]._position);
+          const isChemSlot = Utils.normalizePos(currentItem.preferredPosition) === slotPos;
+          let upgrade = pool.find((p2) => !usedIds.has(p2.id) && !usedPersonaIds.has(p2._personaId) && p2.rating > currentItem.rating && p2.leagueId === currentItem.leagueId && (isChemSlot ? Utils.normalizePos(p2.preferredPosition) === slotPos : true));
+          if (!upgrade) upgrade = pool.find((p2) => !usedIds.has(p2.id) && !usedPersonaIds.has(p2._personaId) && p2.rating > currentItem.rating && p2.leagueId === currentItem.leagueId);
+          if (upgrade) {
+            usedIds.delete(currentItem.id);
+            usedPersonaIds.delete(currentItem._personaId);
+            selected[upIdx] = upgrade;
+            usedIds.add(upgrade.id);
+            usedPersonaIds.add(upgrade._personaId);
+          } else break;
+        }
+      }
+      if (targetRating > 0 && Utils.calculateRating(selected) > targetRating) {
+        log("Trimming excess rating...");
+        let trimAttempts = 0;
+        while (trimAttempts < 50) {
+          trimAttempts++;
+          const currentR = Utils.calculateRating(selected);
+          if (currentR <= targetRating) break;
+          const clubItems = selected.filter((s2) => s2 && s2._sourceType !== "storage");
+          if (clubItems.length === 0) break;
+          const maxR = Math.max(...clubItems.map((s2) => s2.rating));
+          const downIdx = selected.findIndex((s2) => s2 && s2.rating === maxR && s2._sourceType !== "storage");
+          if (downIdx === -1) break;
+          const currentItem = selected[downIdx];
+          const replacement = pool.find((p2) => !usedIds.has(p2.id) && !usedPersonaIds.has(p2._personaId) && p2.rating < currentItem.rating);
+          if (replacement) {
+            const temp = [...selected];
+            temp[downIdx] = replacement;
+            if (Utils.calculateRating(temp) >= targetRating) {
+              console.log(`[TRIM] Downgrading ${currentItem.rating} -> ${replacement.rating}`);
+              usedIds.delete(currentItem.id);
+              usedPersonaIds.delete(currentItem._personaId);
+              selected[downIdx] = replacement;
+              usedIds.add(replacement.id);
+              usedPersonaIds.add(replacement._personaId);
+            } else break;
+          } else break;
+        }
+      }
       const finalArray = new Array(23).fill(null);
       activeSlots.forEach((slot, i2) => {
         if (selected[i2]) finalArray[slot.index] = selected[i2];
       });
       squad.setPlayers(finalArray);
       await Utils.saveSquad(challenge, squad, controller);
-      log("✅ Solve Successful.");
+      log(`✅ Deep Solve Complete. Chem: ${getChem(selected)}`);
     }
   }
   class DeCloggerSolver {
@@ -726,161 +799,260 @@
       log(`✅ De-Clogger Complete. Rating: ${Utils.calculateRating(selected)}`);
     }
   }
-  class LeagueSolver {
+  class EfficientSolver {
     static async solve(log, settings) {
       const ctx = Utils.getSbcContext();
       if (!ctx) return log("❌ SBC Screen Not Found");
       const { challenge, squad, controller } = ctx;
       log("Analyzing Requirements...");
       const rawReqs = challenge.eligibilityRequirements || [];
-      let targetRating = 0;
-      let isTotwReq = false;
-      const detectedLeagues = new Set();
+      let minRaresNeeded = 0;
+      const buckets = [];
+      let globalLevel = null;
+      const levelsToDiscover = new Set();
       rawReqs.forEach((r2) => {
+        const rules = [];
         const col = r2.kvPairs._collection || r2.kvPairs;
-        for (let k2 in col) {
-          const val = Utils.getCleanValue(col[k2]);
-          const key = parseInt(k2);
-          if (key === 19) targetRating = Math.max(targetRating, Number(Array.isArray(val) ? val[0] : val) || 0);
-          if (key === 11) (Array.isArray(val) ? val : [val]).forEach((l2) => detectedLeagues.add(l2));
-          if (key === 18 && val.includes(3)) isTotwReq = true;
+        for (let k2 in col) rules.push({ key: parseInt(k2), value: Utils.getCleanValue(col[k2]) });
+        const isRare = rules.some((rl) => rl.key === 25 && rl.value.includes(4) || rl.key === 18 && rl.value.includes(1));
+        if (isRare) minRaresNeeded = Math.max(minRaresNeeded, r2.count || 0);
+        const bronze = rules.some((rl) => rl.key === 17 && rl.value.includes(1) || rl.key === 3 && rl.value.includes(1));
+        const silver = rules.some((rl) => rl.key === 17 && rl.value.includes(2) || rl.key === 3 && rl.value.includes(2));
+        const gold = rules.some((rl) => rl.key === 17 && rl.value.includes(3) || rl.key === 3 && rl.value.includes(3));
+        const bInfo = bronze ? { level: "bronze", min: 0, max: 64 } : silver ? { level: "silver", min: 65, max: 74 } : gold ? { level: "gold", min: 75, max: 82 } : null;
+        if (bInfo) {
+          levelsToDiscover.add(bInfo.level);
+          if (r2.count > 0) buckets.push({ ...bInfo, count: r2.count });
+          else if (r2.count === -1) globalLevel = bInfo;
         }
       });
-      log(`Target: ${targetRating} OVR | Chem: 10`);
-      const discoveryLeagues = Array.from(detectedLeagues).slice(0, 3);
-      await Promise.all(discoveryLeagues.map((l2) => Inventory.fetchItems({ league: l2, count: 250 })));
-      await Inventory.primeInventory();
-      const globalLeagues = Array.from(detectedLeagues);
+      if (buckets.length === 0 && !globalLevel) globalLevel = { level: "gold", min: 75, max: 82 };
+      if (Inventory.memory.length === 0) await Inventory.primeInventory(Array.from(levelsToDiscover));
       const pool = Inventory.memory.filter((p2) => {
         if (settings.untradOnly && p2.tradable === true) return false;
         if (settings.excludedLeagues.includes(p2.leagueId)) return false;
-        if (p2.rating >= 83) return false;
-        if (globalLeagues.length > 0 && !globalLeagues.includes(p2.leagueId)) return false;
-        const isStandard = p2.rareflag === 0 || p2.rareflag === 1 || isTotwReq && (p2.rarityId === 3 || p2.rareflag === 3);
+        const isStandard = p2.rareflag === 0 || p2.rareflag === 1;
         if (!isStandard) return false;
         return true;
       }).sort((a2, b2) => a2._sourcePriority - b2._sourcePriority || a2.rating - b2.rating);
       const usedPersonaIds = new Set();
       const usedIds = new Set();
       const activeSlots = squad.getSBCSlots().filter((s2) => !s2.isBrick() && s2.index <= 10);
-      let selected = new Array(activeSlots.length).fill(null);
-      const getChem = (items) => {
-        const tempPlayers = new Array(23).fill(null);
-        activeSlots.forEach((slot, i2) => {
-          if (items[i2]) tempPlayers[slot.index] = items[i2];
+      const selected = new Array(activeSlots.length).fill(null);
+      let raresInserted = 0;
+      const findMatch = (lvl, rareflag, ignoreRarity = false) => {
+        return pool.find((p2) => {
+          if (usedIds.has(p2.id) || usedPersonaIds.has(p2._personaId)) return false;
+          if (p2.rating < lvl.min || p2.rating > (lvl.level === "gold" ? 82 : lvl.max)) return false;
+          if (!ignoreRarity && p2.rareflag !== rareflag) return false;
+          return true;
         });
-        squad.setPlayers(tempPlayers);
-        return squad.getChemistry();
       };
-      const fillPass = (source, matchPos) => {
+      [...buckets, ...globalLevel ? [{ ...globalLevel, count: 11 }] : []].forEach((bucket) => {
+        let count = 0;
+        const targetCount = bucket.count === 11 || bucket.count === -1 ? activeSlots.length : bucket.count;
         activeSlots.forEach((slot, i2) => {
-          if (selected[i2]) return;
-          if (matchPos && getChem(selected) >= 10) return;
-          const slotPos = Utils.normalizePos(slot.position?.id || slot._position);
-          const match = pool.find((p2) => {
-            if (usedIds.has(p2.id) || usedPersonaIds.has(p2._personaId)) return false;
-            if (source && p2._sourceType !== source) return false;
-            if (matchPos && Utils.normalizePos(p2.preferredPosition) !== slotPos) return false;
-            return true;
-          });
+          if (selected[i2] || count >= targetCount) return;
+          let match = raresInserted < minRaresNeeded ? findMatch(bucket, 1) : findMatch(bucket, 0, bucket.level !== "gold");
+          if (!match) match = findMatch(bucket, 0, true);
           if (match) {
+            console.log(`[DECISION] Slot ${slot.index}: ${match.rareflag ? "RARE" : "COMMON"} ${match._staticData?.name} (${match.rating})`);
             selected[i2] = match;
             usedIds.add(match.id);
             usedPersonaIds.add(match._personaId);
+            count++;
+            if (match.rareflag) raresInserted++;
           }
         });
-      };
-      fillPass("storage", true);
-      fillPass("club", true);
-      fillPass("storage", false);
-      fillPass("club", false);
-      log("Running Position Re-Optimizer...");
-      const currentItems = selected.filter((s2) => s2);
-      if (currentItems.length === 11) {
-        [...selected];
-        let maxChem = getChem(selected);
-        for (let i2 = 0; i2 < 11; i2++) {
-          for (let j2 = i2 + 1; j2 < 11; j2++) {
-            const temp = [...selected];
-            [temp[i2], temp[j2]] = [temp[j2], temp[i2]];
-            const newChem = getChem(temp);
-            if (newChem > maxChem) {
-              maxChem = newChem;
-              selected = [...temp];
-              console.log(`[DEEP CHECK] Swapped slots ${i2} & ${j2} for +chem`);
-            }
-          }
-        }
-      }
-      if (targetRating > 0 && Utils.calculateRating(selected) < targetRating) {
-        log(`Increasing rating to ${targetRating}...`);
-        let bridgeAttempts = 0;
-        while (bridgeAttempts < 50 && Utils.calculateRating(selected) < targetRating) {
-          bridgeAttempts++;
-          const minR = Math.min(...selected.filter((s2) => s2).map((s2) => s2.rating));
-          const upIdx = selected.findIndex((s2) => s2 && s2.rating === minR);
-          if (upIdx === -1) break;
-          const currentItem = selected[upIdx];
-          const slotPos = Utils.normalizePos(activeSlots[upIdx].position?.id || activeSlots[upIdx]._position);
-          const isChemSlot = Utils.normalizePos(currentItem.preferredPosition) === slotPos;
-          let upgrade = pool.find((p2) => !usedIds.has(p2.id) && !usedPersonaIds.has(p2._personaId) && p2.rating > currentItem.rating && p2.leagueId === currentItem.leagueId && (isChemSlot ? Utils.normalizePos(p2.preferredPosition) === slotPos : true));
-          if (!upgrade) upgrade = pool.find((p2) => !usedIds.has(p2.id) && !usedPersonaIds.has(p2._personaId) && p2.rating > currentItem.rating && p2.leagueId === currentItem.leagueId);
-          if (upgrade) {
-            usedIds.delete(currentItem.id);
-            usedPersonaIds.delete(currentItem._personaId);
-            selected[upIdx] = upgrade;
-            usedIds.add(upgrade.id);
-            usedPersonaIds.add(upgrade._personaId);
-          } else break;
-        }
-      }
-      if (targetRating > 0 && Utils.calculateRating(selected) > targetRating) {
-        log("Trimming excess rating...");
-        let trimAttempts = 0;
-        while (trimAttempts < 50) {
-          trimAttempts++;
-          const currentR = Utils.calculateRating(selected);
-          if (currentR <= targetRating) break;
-          const maxR = Math.max(...selected.filter((s2) => s2).map((s2) => s2.rating));
-          const downIdx = selected.findIndex((s2) => s2 && s2.rating === maxR);
-          if (downIdx === -1) break;
-          const currentItem = selected[downIdx];
-          const replacement = pool.find((p2) => !usedIds.has(p2.id) && !usedPersonaIds.has(p2._personaId) && p2.rating < currentItem.rating);
-          if (replacement) {
-            const temp = [...selected];
-            temp[downIdx] = replacement;
-            if (Utils.calculateRating(temp) >= targetRating) {
-              console.log(`[TRIM] Downgrading ${currentItem.rating} -> ${replacement.rating}`);
-              usedIds.delete(currentItem.id);
-              usedPersonaIds.delete(currentItem._personaId);
-              selected[downIdx] = replacement;
-              usedIds.add(replacement.id);
-              usedPersonaIds.add(replacement._personaId);
-            } else break;
-          } else break;
-        }
-      }
+      });
       const finalArray = new Array(23).fill(null);
       activeSlots.forEach((slot, i2) => {
         if (selected[i2]) finalArray[slot.index] = selected[i2];
       });
       squad.setPlayers(finalArray);
       await Utils.saveSquad(challenge, squad, controller);
-      log(`✅ Deep Solve Complete. Chem: ${getChem(selected)}`);
+      log("✅ Solve Successful.");
+    }
+  }
+  class ChallengeSolver {
+    static async solve(log, settings) {
+      const ctx = Utils.getSbcContext();
+      if (!ctx) return log("❌ SBC Screen Not Found");
+      const { challenge, squad, controller } = ctx;
+      log("Analyzing Complex Constraints...");
+      const constraints = {
+        maxSameClub: 11,
+        maxSameNation: 11,
+        maxSameLeague: 11,
+        maxTotalNations: 11,
+        maxTotalLeagues: 11,
+        minGold: 0,
+        minRare: 0,
+        targetRating: 0,
+        targetChem: 0
+      };
+      (challenge.eligibilityRequirements || []).forEach((r2) => {
+        const col = r2.kvPairs._collection || r2.kvPairs;
+        const keys = Object.keys(col).map((k2) => parseInt(k2));
+        const vals = Object.values(col).map((v2) => Utils.getCleanValue(v2)).flat();
+        if (keys.includes(19)) constraints.targetRating = Math.max(constraints.targetRating, r2.count || vals[0] || 0);
+        if (keys.includes(35)) constraints.targetChem = Math.max(constraints.targetChem, vals[0] || 0);
+        if (keys.includes(17) && vals.includes(3)) constraints.minGold = r2.count;
+        if (keys.includes(25) && vals.includes(4)) constraints.minRare = r2.count;
+        if (keys.includes(15) || keys.includes(5)) {
+          if (r2.count > 0 && r2.count < 11) constraints.maxTotalNations = Math.min(constraints.maxTotalNations, r2.count);
+          vals.forEach((v2) => {
+            if (typeof v2 === "number" && v2 > 0 && v2 < 5) constraints.maxTotalNations = Math.min(constraints.maxTotalNations, v2);
+          });
+        }
+        if (keys.includes(12) || keys.includes(6)) {
+          if (r2.count > 0 && r2.count < 11) constraints.maxTotalLeagues = Math.min(constraints.maxTotalLeagues, r2.count);
+        }
+      });
+      log(`Targets: ${constraints.targetChem} Chem | ${constraints.maxTotalNations} Nations | ${constraints.minGold} Gold`);
+      log("Performing Multi-Pass Sync...");
+      await Promise.all([
+        Inventory.fetchItems({ count: 250 }),
+Inventory.fetchItems({ league: 13, count: 50 }),
+Inventory.fetchItems({ league: 53, count: 50 }),
+Inventory.fetchItems({ league: 19, count: 50 })
+]);
+      await Inventory.primeInventory();
+      const pool = Inventory.memory.filter(
+        (p2) => p2.tradable === false && !p2.evolutionInfo && p2.rareflag <= 1 && p2.rating < 83
+      );
+      const activeSlots = squad.getSBCSlots().filter((s2) => !s2.isBrick() && s2.index <= 10);
+      const getStats = (items) => {
+        const active = items.filter((p2) => p2 !== null);
+        if (active.length === 0) return { chem: 0, rating: 0, nations: 0, rare: 0, gold: 0 };
+        let chem = 0;
+        const nMap = {}, lMap = {}, cMap = {};
+        const inPos = items.map((p2, i2) => {
+          if (!p2) return false;
+          const slotPos = Utils.normalizePos(activeSlots[i2].position?.id || activeSlots[i2]._position);
+          const ok = Utils.normalizePos(p2.preferredPosition) === slotPos;
+          if (ok) {
+            nMap[p2.nationId] = (nMap[p2.nationId] || 0) + 1;
+            lMap[p2.leagueId] = (lMap[p2.leagueId] || 0) + 1;
+            cMap[p2.teamId] = (cMap[p2.teamId] || 0) + 1;
+          }
+          return ok;
+        });
+        items.forEach((p2, i2) => {
+          if (!p2 || !inPos[i2]) return;
+          if (nMap[p2.nationId] >= 9) chem += 3;
+          else if (nMap[p2.nationId] >= 6) chem += 2;
+          else if (nMap[p2.nationId] >= 3) chem += 1;
+          if (lMap[p2.leagueId] >= 8) chem += 3;
+          else if (lMap[p2.leagueId] >= 5) chem += 2;
+          else if (lMap[p2.leagueId] >= 3) chem += 1;
+          if (cMap[p2.teamId] >= 7) chem += 3;
+          else if (cMap[p2.teamId] >= 4) chem += 2;
+          else if (cMap[p2.teamId] >= 2) chem += 1;
+        });
+        return {
+          chem,
+          rating: Utils.calculateRating(items),
+          nations: new Set(active.map((p2) => p2.nationId)).size,
+          gold: active.filter((p2) => p2.rating >= 75).length,
+          rare: active.filter((p2) => p2.rareflag === 1).length
+        };
+      };
+      const runTrial = (lid, nid) => {
+        const selected = new Array(11).fill(null);
+        const usedIds = new Set();
+        const usedPersonaIds = new Set();
+        const counts = { club: {}, nation: {}, league: {}, gold: 0, rare: 0 };
+        let iterations = 0;
+        const isValid = (p2, slotIdx) => {
+          if (usedIds.has(p2.id) || usedPersonaIds.has(p2._personaId)) return false;
+          if ((counts.club[p2.teamId] || 0) >= constraints.maxSameClub) return false;
+          if ((counts.nation[p2.nationId] || 0) >= constraints.maxSameNation) return false;
+          if ((counts.league[p2.leagueId] || 0) >= (p2.leagueId === lid ? 11 : constraints.maxSameLeague)) return false;
+          const curNations = new Set(selected.filter((x2) => x2).map((x2) => x2.nationId));
+          if (!curNations.has(p2.nationId) && curNations.size >= constraints.maxTotalNations) return false;
+          const slotsLeft = 11 - slotIdx - 1;
+          if (counts.gold < constraints.minGold && constraints.minGold - counts.gold > slotsLeft + (p2.rating >= 75 ? 1 : 0)) return false;
+          if (counts.rare < constraints.minRare && constraints.minRare - counts.rare > slotsLeft + (p2.rareflag === 1 ? 1 : 0)) return false;
+          return true;
+        };
+        const sortedPool = [...pool].sort((a2, b2) => a2.leagueId === lid && a2.nationId === nid ? -1 : 1);
+        const solve = (idx) => {
+          iterations++;
+          if (iterations > 3e3) return false;
+          if (idx === 11) return true;
+          const slotPos = Utils.normalizePos(activeSlots[idx].position?.id || activeSlots[idx]._position);
+          const candidates2 = sortedPool.filter((p2) => isValid(p2, idx)).sort((a2, b2) => Utils.normalizePos(a2.preferredPosition) === slotPos ? -1 : 1).slice(0, 15);
+          for (const p2 of candidates2) {
+            selected[idx] = p2;
+            usedIds.add(p2.id);
+            usedPersonaIds.add(p2._personaId);
+            counts.club[p2.teamId] = (counts.club[p2.teamId] || 0) + 1;
+            counts.nation[p2.nationId] = (counts.nation[p2.nationId] || 0) + 1;
+            counts.league[p2.leagueId] = (counts.league[p2.leagueId] || 0) + 1;
+            if (p2.rating >= 75) counts.gold++;
+            if (p2.rareflag === 1) counts.rare++;
+            if (solve(idx + 1)) return true;
+            selected[idx] = null;
+            usedIds.delete(p2.id);
+            usedPersonaIds.delete(p2._personaId);
+            counts.club[p2.teamId]--;
+            counts.nation[p2.nationId]--;
+            counts.league[p2.leagueId]--;
+            if (p2.rating >= 75) counts.gold--;
+            if (p2.rareflag === 1) counts.rare--;
+          }
+          return false;
+        };
+        return solve(0) ? { squad: selected, ...getStats(selected), lid, nid } : null;
+      };
+      const lCounts = {};
+      pool.forEach((p2) => lCounts[p2.leagueId] = (lCounts[p2.leagueId] || 0) + 1);
+      const topLeagues = Object.entries(lCounts).sort((a2, b2) => b2[1] - a2[1]).slice(0, 10).map((x2) => parseInt(x2[0]));
+      const candidates = [];
+      topLeagues.forEach((lid) => {
+        const lp = pool.filter((p2) => p2.leagueId === lid);
+        const nc = {};
+        lp.forEach((p2) => nc[p2.nationId] = (nc[p2.nationId] || 0) + 1);
+        Object.entries(nc).sort((a2, b2) => b2[1] - a2[1]).slice(0, 3).forEach((n2) => candidates.push({ lid, nid: parseInt(n2[0]) }));
+      });
+      let best = null;
+      for (const c2 of candidates) {
+        const res = runTrial(c2.lid, c2.nid);
+        if (!res) continue;
+        const valid = res.chem >= constraints.targetChem && res.rating >= constraints.targetRating && res.gold >= constraints.minGold && res.rare >= constraints.minRare && res.nations <= constraints.maxTotalNations;
+        const score = res.chem * 100 + (1e3 - Math.abs(res.rating - constraints.targetRating) * 10);
+        if (valid && (!best || score > best.score)) best = { ...res, score };
+      }
+      if (best) {
+        log(`✅ Found Solution: L:${best.lid} N:${best.nid} (${best.chem} Chem)`);
+        const final = new Array(23).fill(null);
+        best.squad.forEach((p2, i2) => {
+          if (p2) final[activeSlots[i2].index] = p2;
+        });
+        squad.setPlayers(final);
+        await Utils.saveSquad(challenge, squad, controller);
+        log("✅ Challenge Solved and Saved.");
+      } else {
+        log("❌ No Valid Solution Found. Adjusting discovery might help.");
+      }
     }
   }
   class SbcBuilder {
     static async primeInventory(targetLevels = []) {
       return await Inventory.primeInventory(targetLevels);
     }
-    static async solveEfficient(log, settings) {
-      return await EfficientSolver.solve(log, settings);
+    static async solveLeague(log, settings) {
+      await LeagueSolver.solve(log, settings);
     }
     static async solveDeClogger(log, settings) {
-      return await DeCloggerSolver.solve(log, settings);
+      await DeCloggerSolver.solve(log, settings);
     }
-    static async solveLeague(log, settings) {
-      return await LeagueSolver.solve(log, settings);
+    static async solveEfficient(log, settings) {
+      await EfficientSolver.solve(log, settings);
+    }
+    static async solveChallenge(log, settings) {
+      await ChallengeSolver.solve(log, settings);
     }
   }
   function App() {
@@ -925,7 +1097,8 @@
         const solverMap = {
           league: SbcBuilder.solveLeague.bind(SbcBuilder),
           declog: SbcBuilder.solveDeClogger.bind(SbcBuilder),
-          efficient: SbcBuilder.solveEfficient.bind(SbcBuilder)
+          efficient: SbcBuilder.solveEfficient.bind(SbcBuilder),
+          challenge: SbcBuilder.solveChallenge.bind(SbcBuilder)
         };
         await solverMap[type]((msg) => setStatus(msg), { untradOnly, excludedLeagues });
         const res = await SbcBuilder.primeInventory();
@@ -995,7 +1168,7 @@ u$1(
               className: "animate-in slide-in-from-left-4 fade-in duration-300",
               children: [
 u$1("div", { className: "flex justify-between items-center mb-6", children: [
-u$1("h2", { className: "text-xs font-black text-white tracking-widest uppercase opacity-60", children: "SBC Master V1.0.17" }),
+u$1("h2", { className: "text-xs font-black text-white tracking-widest uppercase opacity-60", children: "SBC Master V1.0.18" }),
 u$1(
                     "button",
                     {
@@ -1046,6 +1219,16 @@ u$1("div", { className: `absolute left-1 top-1 w-4 h-4 bg-white rounded-full tra
                     ] })
                   ] }) }),
 u$1("div", { className: "space-y-3 pt-2", children: [
+u$1(
+                      "button",
+                      {
+                        disabled: isSolving,
+                        onClick: () => runSolver("challenge"),
+                        style: { background: "#7c3aed", borderBottom: "4px solid #5b21b6", minHeight: "48px" },
+                        className: "w-full text-white rounded-2xl text-[10px] font-black shadow-lg transition-all active:translate-y-[2px] active:border-b-0 flex items-center justify-center gap-2 uppercase tracking-widest",
+                        children: "🏆 Challenge Solver"
+                      }
+                    ),
 u$1(
                       "button",
                       {

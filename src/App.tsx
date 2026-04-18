@@ -34,14 +34,15 @@ export function App() {
     }
   };
 
-  const runSolver = async (type: 'league' | 'declog' | 'efficient') => {
+  const runSolver = async (type: 'league' | 'declog' | 'efficient' | 'challenge') => {
     setIsSolving(true);
     setStatus(`Solving ${type}...`);
     try {
       const solverMap = {
         league: SbcBuilder.solveLeague.bind(SbcBuilder),
         declog: SbcBuilder.solveDeClogger.bind(SbcBuilder),
-        efficient: SbcBuilder.solveEfficient.bind(SbcBuilder)
+        efficient: SbcBuilder.solveEfficient.bind(SbcBuilder),
+        challenge: SbcBuilder.solveChallenge.bind(SbcBuilder)
       };
       await solverMap[type]((msg: string) => setStatus(msg), { untradOnly, excludedLeagues });
       const res = await SbcBuilder.primeInventory();
@@ -110,7 +111,7 @@ export function App() {
             className="animate-in slide-in-from-left-4 fade-in duration-300"
         >
           <div className="flex justify-between items-center mb-6">
-            <h2 className="text-xs font-black text-white tracking-widest uppercase opacity-60">SBC Master V1.0.17</h2>
+            <h2 className="text-xs font-black text-white tracking-widest uppercase opacity-60">SBC Master V1.0.18</h2>
             <button 
               onClick={handleScan}
               disabled={isScanning}
@@ -171,6 +172,15 @@ export function App() {
 
             {/* Action Buttons */}
             <div className="space-y-3 pt-2">
+              <button
+                disabled={isSolving}
+                onClick={() => runSolver('challenge')}
+                style={{ background: '#7c3aed', borderBottom: '4px solid #5b21b6', minHeight: '48px' }}
+                className="w-full text-white rounded-2xl text-[10px] font-black shadow-lg transition-all active:translate-y-[2px] active:border-b-0 flex items-center justify-center gap-2 uppercase tracking-widest"
+              >
+                🏆 Challenge Solver
+              </button>
+
               <button
                 disabled={isSolving}
                 onClick={() => runSolver('league')}

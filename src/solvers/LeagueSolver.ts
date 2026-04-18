@@ -10,7 +10,7 @@ export class LeagueSolver {
 
     log("Analyzing Requirements...");
     const rawReqs = challenge.eligibilityRequirements || [];
-    let targetRating = 0; let isTotwReq = false;
+    let targetRating = 0; let targetChem = 0; let isTotwReq = false;
     const detectedLeagues = new Set<number>();
 
     rawReqs.forEach((r: any) => {
@@ -19,12 +19,13 @@ export class LeagueSolver {
             const val = Utils.getCleanValue(col[k]);
             const key = parseInt(k);
             if (key === 19) targetRating = Math.max(targetRating, Number(Array.isArray(val) ? val[0] : val) || 0);
+            if (key === 35) targetChem = Math.max(targetChem, Number(Array.isArray(val) ? val[0] : val) || 0);
             if (key === 11) (Array.isArray(val) ? val : [val]).forEach(l => detectedLeagues.add(l));
             if (key === 18 && val.includes(3)) isTotwReq = true;
         }
     });
 
-    log(`Target: ${targetRating} OVR | Chem: 10`);
+    log(`Target: ${targetRating} OVR | Chem: ${targetChem}`);
     
     // Deeper Discovery for more options
     const discoveryLeagues = Array.from(detectedLeagues).slice(0, 3);
@@ -35,7 +36,7 @@ export class LeagueSolver {
     const pool = Inventory.memory.filter(p => {
         if (settings.untradOnly && p.tradable === true) return false;
         if (settings.excludedLeagues.includes(p.leagueId!)) return false;
-        if (p.rating >= 83) return false;
+        if (p.rating >= 83 && p._sourceType !== 'storage') return false;
         if (globalLeagues.length > 0 && !globalLeagues.includes(p.leagueId!)) return false;
         const isStandard = p.rareflag === 0 || p.rareflag === 1 || (isTotwReq && (p.rarityId === 3 || p.rareflag === 3));
         if (!isStandard) return false;
@@ -57,7 +58,7 @@ export class LeagueSolver {
     const fillPass = (source: string | null, matchPos: boolean) => {
         activeSlots.forEach((slot: any, i: number) => {
             if (selected[i]) return;
-            if (matchPos && getChem(selected) >= 10) return; // Optimization: Stop matching pos if chem hit
+            if (matchPos && targetChem > 0 && getChem(selected) >= targetChem) return; 
             const slotPos = Utils.normalizePos(slot.position?.id || slot._position);
             const match = pool.find(p => {
                 if (usedIds.has(p.id) || usedPersonaIds.has(p._personaId!)) return false;
@@ -84,7 +85,6 @@ export class LeagueSolver {
     const currentItems = selected.filter(s => s) as EAItem[];
     if (currentItems.length === 11) {
         // Try to reassign these same 11 players to best slots
-        const bestConfig = [...selected];
         let maxChem = getChem(selected);
         
         // Simple greedy swap to boost chem without changing players
@@ -108,8 +108,11 @@ export class LeagueSolver {
         let bridgeAttempts = 0;
         while (bridgeAttempts < 50 && Utils.calculateRating(selected) < targetRating) {
             bridgeAttempts++;
-            const minR = Math.min(...selected.filter(s => s).map(s => s!.rating));
-            const upIdx = selected.findIndex(s => s && s.rating === minR);
+            const clubItems = selected.filter(s => s && s._sourceType !== 'storage') as EAItem[];
+            if (clubItems.length === 0) break;
+
+            const minR = Math.min(...clubItems.map(s => s.rating));
+            const upIdx = selected.findIndex(s => s && s.rating === minR && s._sourceType !== 'storage');
             if (upIdx === -1) break;
             const currentItem = selected[upIdx]!;
             const slotPos = Utils.normalizePos(activeSlots[upIdx].position?.id || activeSlots[upIdx]._position);
@@ -134,8 +137,11 @@ export class LeagueSolver {
             const currentR = Utils.calculateRating(selected);
             if (currentR <= targetRating) break;
 
-            const maxR = Math.max(...selected.filter(s => s).map(s => s!.rating));
-            const downIdx = selected.findIndex(s => s && s.rating === maxR);
+            const clubItems = selected.filter(s => s && s._sourceType !== 'storage') as EAItem[];
+            if (clubItems.length === 0) break;
+
+            const maxR = Math.max(...clubItems.map(s => s.rating));
+            const downIdx = selected.findIndex(s => s && s.rating === maxR && s._sourceType !== 'storage');
             if (downIdx === -1) break;
             const currentItem = selected[downIdx]!;
 
