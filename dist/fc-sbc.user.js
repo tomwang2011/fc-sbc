@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC SBC Enhanced Builder
 // @namespace    fc-sbc-builder
-// @version      1.0.16
+// @version      1.0.17
 // @author       tomwang
 // @description  Optimal SBC builder with Storage-First priority
 // @license      ISC
@@ -731,7 +731,7 @@
       const ctx = Utils.getSbcContext();
       if (!ctx) return log("❌ SBC Screen Not Found");
       const { challenge, squad, controller } = ctx;
-      log("Analyzing Target Rating...");
+      log("Analyzing Requirements...");
       const rawReqs = challenge.eligibilityRequirements || [];
       let targetRating = 0;
       let isTotwReq = false;
@@ -746,9 +746,9 @@
           if (key === 18 && val.includes(3)) isTotwReq = true;
         }
       });
-      log(`Goal: ${targetRating} OVR | Required Leagues: ${Array.from(detectedLeagues).join(",")}`);
+      log(`Target: ${targetRating} OVR | Chem: 10`);
       const discoveryLeagues = Array.from(detectedLeagues).slice(0, 3);
-      await Promise.all(discoveryLeagues.map((l2) => Inventory.fetchItems({ league: l2, count: 150 })));
+      await Promise.all(discoveryLeagues.map((l2) => Inventory.fetchItems({ league: l2, count: 250 })));
       await Inventory.primeInventory();
       const globalLeagues = Array.from(detectedLeagues);
       const pool = Inventory.memory.filter((p2) => {
@@ -763,47 +763,57 @@
       const usedPersonaIds = new Set();
       const usedIds = new Set();
       const activeSlots = squad.getSBCSlots().filter((s2) => !s2.isBrick() && s2.index <= 10);
-      const selected = new Array(activeSlots.length).fill(null);
-      const getChem = () => {
+      let selected = new Array(activeSlots.length).fill(null);
+      const getChem = (items) => {
         const tempPlayers = new Array(23).fill(null);
         activeSlots.forEach((slot, i2) => {
-          if (selected[i2]) tempPlayers[slot.index] = selected[i2];
+          if (items[i2]) tempPlayers[slot.index] = items[i2];
         });
         squad.setPlayers(tempPlayers);
         return squad.getChemistry();
       };
-      const fillSlot = (i2, item, reason) => {
-        selected[i2] = item;
-        usedIds.add(item.id);
-        usedPersonaIds.add(item._personaId);
-        console.log(`[DECISION] Slot ${activeSlots[i2].index}: ${item._staticData?.name} (${item.rating}) [Reason: ${reason}]`);
-      };
-      activeSlots.forEach((slot, i2) => {
-        if (selected[i2]) return;
-        const slotPos = Utils.normalizePos(slot.position?.id || slot._position);
-        const match = pool.find((p2) => p2._sourceType === "storage" && !usedIds.has(p2.id) && !usedPersonaIds.has(p2._personaId) && Utils.normalizePos(p2.preferredPosition) === slotPos);
-        if (match) fillSlot(i2, match, "Storage Pos Match");
-      });
-      if (getChem() < 10) {
+      const fillPass = (source, matchPos) => {
         activeSlots.forEach((slot, i2) => {
-          if (selected[i2] || getChem() >= 10) return;
+          if (selected[i2]) return;
+          if (matchPos && getChem(selected) >= 10) return;
           const slotPos = Utils.normalizePos(slot.position?.id || slot._position);
-          const match = pool.find((p2) => p2._sourceType === "club" && !usedIds.has(p2.id) && !usedPersonaIds.has(p2._personaId) && Utils.normalizePos(p2.preferredPosition) === slotPos);
-          if (match) fillSlot(i2, match, "Club Chem Snipe");
+          const match = pool.find((p2) => {
+            if (usedIds.has(p2.id) || usedPersonaIds.has(p2._personaId)) return false;
+            if (source && p2._sourceType !== source) return false;
+            if (matchPos && Utils.normalizePos(p2.preferredPosition) !== slotPos) return false;
+            return true;
+          });
+          if (match) {
+            selected[i2] = match;
+            usedIds.add(match.id);
+            usedPersonaIds.add(match._personaId);
+          }
         });
+      };
+      fillPass("storage", true);
+      fillPass("club", true);
+      fillPass("storage", false);
+      fillPass("club", false);
+      log("Running Position Re-Optimizer...");
+      const currentItems = selected.filter((s2) => s2);
+      if (currentItems.length === 11) {
+        [...selected];
+        let maxChem = getChem(selected);
+        for (let i2 = 0; i2 < 11; i2++) {
+          for (let j2 = i2 + 1; j2 < 11; j2++) {
+            const temp = [...selected];
+            [temp[i2], temp[j2]] = [temp[j2], temp[i2]];
+            const newChem = getChem(temp);
+            if (newChem > maxChem) {
+              maxChem = newChem;
+              selected = [...temp];
+              console.log(`[DEEP CHECK] Swapped slots ${i2} & ${j2} for +chem`);
+            }
+          }
+        }
       }
-      activeSlots.forEach((slot, i2) => {
-        if (selected[i2]) return;
-        const match = pool.find((p2) => p2._sourceType === "storage" && !usedIds.has(p2.id) && !usedPersonaIds.has(p2._personaId));
-        if (match) fillSlot(i2, match, "Storage Leftover Dump");
-      });
-      activeSlots.forEach((slot, i2) => {
-        if (selected[i2]) return;
-        const match = pool.find((p2) => !usedIds.has(p2.id) && !usedPersonaIds.has(p2._personaId));
-        if (match) fillSlot(i2, match, "Club Filler");
-      });
-      if (targetRating > 0) {
-        log(`Balancing Rating to hit ${targetRating}...`);
+      if (targetRating > 0 && Utils.calculateRating(selected) < targetRating) {
+        log(`Increasing rating to ${targetRating}...`);
         let bridgeAttempts = 0;
         while (bridgeAttempts < 50 && Utils.calculateRating(selected) < targetRating) {
           bridgeAttempts++;
@@ -811,18 +821,42 @@
           const upIdx = selected.findIndex((s2) => s2 && s2.rating === minR);
           if (upIdx === -1) break;
           const currentItem = selected[upIdx];
-          const slot = activeSlots[upIdx];
-          const slotPos = Utils.normalizePos(slot.position?.id || slot._position);
-          const wasPosMatch = Utils.normalizePos(currentItem.preferredPosition) === slotPos;
-          let upgrade = pool.find((p2) => !usedIds.has(p2.id) && !usedPersonaIds.has(p2._personaId) && p2.rating > currentItem.rating && p2.leagueId === currentItem.leagueId && (wasPosMatch ? Utils.normalizePos(p2.preferredPosition) === slotPos : true));
+          const slotPos = Utils.normalizePos(activeSlots[upIdx].position?.id || activeSlots[upIdx]._position);
+          const isChemSlot = Utils.normalizePos(currentItem.preferredPosition) === slotPos;
+          let upgrade = pool.find((p2) => !usedIds.has(p2.id) && !usedPersonaIds.has(p2._personaId) && p2.rating > currentItem.rating && p2.leagueId === currentItem.leagueId && (isChemSlot ? Utils.normalizePos(p2.preferredPosition) === slotPos : true));
           if (!upgrade) upgrade = pool.find((p2) => !usedIds.has(p2.id) && !usedPersonaIds.has(p2._personaId) && p2.rating > currentItem.rating && p2.leagueId === currentItem.leagueId);
           if (upgrade) {
-            console.log(`[BRIDGE] Upgrading Slot ${slot.index}: ${currentItem.rating} -> ${upgrade.rating}`);
             usedIds.delete(currentItem.id);
             usedPersonaIds.delete(currentItem._personaId);
             selected[upIdx] = upgrade;
             usedIds.add(upgrade.id);
             usedPersonaIds.add(upgrade._personaId);
+          } else break;
+        }
+      }
+      if (targetRating > 0 && Utils.calculateRating(selected) > targetRating) {
+        log("Trimming excess rating...");
+        let trimAttempts = 0;
+        while (trimAttempts < 50) {
+          trimAttempts++;
+          const currentR = Utils.calculateRating(selected);
+          if (currentR <= targetRating) break;
+          const maxR = Math.max(...selected.filter((s2) => s2).map((s2) => s2.rating));
+          const downIdx = selected.findIndex((s2) => s2 && s2.rating === maxR);
+          if (downIdx === -1) break;
+          const currentItem = selected[downIdx];
+          const replacement = pool.find((p2) => !usedIds.has(p2.id) && !usedPersonaIds.has(p2._personaId) && p2.rating < currentItem.rating);
+          if (replacement) {
+            const temp = [...selected];
+            temp[downIdx] = replacement;
+            if (Utils.calculateRating(temp) >= targetRating) {
+              console.log(`[TRIM] Downgrading ${currentItem.rating} -> ${replacement.rating}`);
+              usedIds.delete(currentItem.id);
+              usedPersonaIds.delete(currentItem._personaId);
+              selected[downIdx] = replacement;
+              usedIds.add(replacement.id);
+              usedPersonaIds.add(replacement._personaId);
+            } else break;
           } else break;
         }
       }
@@ -832,7 +866,7 @@
       });
       squad.setPlayers(finalArray);
       await Utils.saveSquad(challenge, squad, controller);
-      log(`✅ League Solve Complete.`);
+      log(`✅ Deep Solve Complete. Chem: ${getChem(selected)}`);
     }
   }
   class SbcBuilder {
@@ -961,7 +995,7 @@ u$1(
               className: "animate-in slide-in-from-left-4 fade-in duration-300",
               children: [
 u$1("div", { className: "flex justify-between items-center mb-6", children: [
-u$1("h2", { className: "text-xs font-black text-white tracking-widest uppercase opacity-60", children: "SBC Master V1.0.16" }),
+u$1("h2", { className: "text-xs font-black text-white tracking-widest uppercase opacity-60", children: "SBC Master V1.0.17" }),
 u$1(
                     "button",
                     {

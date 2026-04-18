@@ -8,7 +8,7 @@ export class LeagueSolver {
     if (!ctx) return log("❌ SBC Screen Not Found");
     const { challenge, squad, controller } = ctx;
 
-    log("Analyzing Target Rating...");
+    log("Analyzing Requirements...");
     const rawReqs = challenge.eligibilityRequirements || [];
     let targetRating = 0; let isTotwReq = false;
     const detectedLeagues = new Set<number>();
@@ -24,10 +24,11 @@ export class LeagueSolver {
         }
     });
 
-    log(`Goal: ${targetRating} OVR | Required Leagues: ${Array.from(detectedLeagues).join(',')}`);
+    log(`Target: ${targetRating} OVR | Chem: 10`);
     
+    // Deeper Discovery for more options
     const discoveryLeagues = Array.from(detectedLeagues).slice(0, 3);
-    await Promise.all(discoveryLeagues.map(l => Inventory.fetchItems({ league: l, count: 150 })));
+    await Promise.all(discoveryLeagues.map(l => Inventory.fetchItems({ league: l, count: 250 })));
     await Inventory.primeInventory();
     
     const globalLeagues = Array.from(detectedLeagues);
@@ -44,77 +45,110 @@ export class LeagueSolver {
     const usedPersonaIds = new Set<number>();
     const usedIds = new Set<number>();
     const activeSlots = squad.getSBCSlots().filter((s: any) => !s.isBrick() && s.index <= 10);
-    const selected: (EAItem | null)[] = new Array(activeSlots.length).fill(null);
+    let selected: (EAItem | null)[] = new Array(activeSlots.length).fill(null);
 
-    // Helper to calculate chemistry on the fly
-    const getChem = () => {
+    const getChem = (items: (EAItem | null)[]) => {
         const tempPlayers = new Array(23).fill(null);
-        activeSlots.forEach((slot: any, i: number) => { if (selected[i]) tempPlayers[slot.index] = selected[i]; });
+        activeSlots.forEach((slot: any, i: number) => { if (items[i]) tempPlayers[slot.index] = items[i]; });
         squad.setPlayers(tempPlayers);
         return squad.getChemistry();
     };
 
-    const fillSlot = (i: number, item: EAItem, reason: string) => {
-        selected[i] = item;
-        usedIds.add(item.id);
-        usedPersonaIds.add(item._personaId!);
-        console.log(`[DECISION] Slot ${activeSlots[i].index}: ${item._staticData?.name} (${item.rating}) [Reason: ${reason}]`);
+    const fillPass = (source: string | null, matchPos: boolean) => {
+        activeSlots.forEach((slot: any, i: number) => {
+            if (selected[i]) return;
+            if (matchPos && getChem(selected) >= 10) return; // Optimization: Stop matching pos if chem hit
+            const slotPos = Utils.normalizePos(slot.position?.id || slot._position);
+            const match = pool.find(p => {
+                if (usedIds.has(p.id) || usedPersonaIds.has(p._personaId!)) return false;
+                if (source && p._sourceType !== source) return false;
+                if (matchPos && Utils.normalizePos(p.preferredPosition) !== slotPos) return false;
+                return true;
+            });
+            if (match) { 
+                selected[i] = match; usedIds.add(match.id); usedPersonaIds.add(match._personaId!); 
+            }
+        });
     };
 
-    // --- PHASE 1: Storage Position Match (Clear Clogs + Start Chem) ---
-    activeSlots.forEach((slot: any, i: number) => {
-        if (selected[i]) return;
-        const slotPos = Utils.normalizePos(slot.position?.id || slot._position);
-        const match = pool.find(p => p._sourceType === 'storage' && !usedIds.has(p.id) && !usedPersonaIds.has(p._personaId!) && Utils.normalizePos(p.preferredPosition) === slotPos);
-        if (match) fillSlot(i, match, "Storage Pos Match");
-    });
+    // 1. Secured Chem Pass
+    fillPass('storage', true);
+    fillPass('club', true);
+    // 2. Storage Dump (Negative Value clearing)
+    fillPass('storage', false);
+    // 3. Final Fill
+    fillPass('club', false);
 
-    // --- PHASE 2: Club Position Match (Only if Chem < 10) ---
-    if (getChem() < 10) {
-        activeSlots.forEach((slot: any, i: number) => {
-            if (selected[i] || getChem() >= 10) return;
-            const slotPos = Utils.normalizePos(slot.position?.id || slot._position);
-            const match = pool.find(p => p._sourceType === 'club' && !usedIds.has(p.id) && !usedPersonaIds.has(p._personaId!) && Utils.normalizePos(p.preferredPosition) === slotPos);
-            if (match) fillSlot(i, match, "Club Chem Snipe");
-        });
+    // --- DEEP CHECK 1: POSITION SHUFFLE ---
+    log("Running Position Re-Optimizer...");
+    const currentItems = selected.filter(s => s) as EAItem[];
+    if (currentItems.length === 11) {
+        // Try to reassign these same 11 players to best slots
+        const bestConfig = [...selected];
+        let maxChem = getChem(selected);
+        
+        // Simple greedy swap to boost chem without changing players
+        for (let i = 0; i < 11; i++) {
+            for (let j = i + 1; j < 11; j++) {
+                const temp = [...selected];
+                [temp[i], temp[j]] = [temp[j], temp[i]];
+                const newChem = getChem(temp);
+                if (newChem > maxChem) {
+                    maxChem = newChem;
+                    selected = [...temp];
+                    console.log(`[DEEP CHECK] Swapped slots ${i} & ${j} for +chem`);
+                }
+            }
+        }
     }
 
-    // --- PHASE 3: Storage Dump (Random Positions) ---
-    activeSlots.forEach((slot: any, i: number) => {
-        if (selected[i]) return;
-        const match = pool.find(p => p._sourceType === 'storage' && !usedIds.has(p.id) && !usedPersonaIds.has(p._personaId!));
-        if (match) fillSlot(i, match, "Storage Leftover Dump");
-    });
-
-    // --- PHASE 4: Final Club Fill ---
-    activeSlots.forEach((slot: any, i: number) => {
-        if (selected[i]) return;
-        const match = pool.find(p => !usedIds.has(p.id) && !usedPersonaIds.has(p._personaId!));
-        if (match) fillSlot(i, match, "Club Filler");
-    });
-
-    // --- RATING BRIDGE PASS ---
-    if (targetRating > 0) {
-        log(`Balancing Rating to hit ${targetRating}...`);
+    // --- DEEP CHECK 2: UPWARD RATING BRIDGE ---
+    if (targetRating > 0 && Utils.calculateRating(selected) < targetRating) {
+        log(`Increasing rating to ${targetRating}...`);
         let bridgeAttempts = 0;
         while (bridgeAttempts < 50 && Utils.calculateRating(selected) < targetRating) {
             bridgeAttempts++;
             const minR = Math.min(...selected.filter(s => s).map(s => s!.rating));
             const upIdx = selected.findIndex(s => s && s.rating === minR);
             if (upIdx === -1) break;
-
             const currentItem = selected[upIdx]!;
-            const slot = activeSlots[upIdx];
-            const slotPos = Utils.normalizePos(slot.position?.id || slot._position);
-            const wasPosMatch = Utils.normalizePos(currentItem.preferredPosition) === slotPos;
+            const slotPos = Utils.normalizePos(activeSlots[upIdx].position?.id || activeSlots[upIdx]._position);
+            const isChemSlot = Utils.normalizePos(currentItem.preferredPosition) === slotPos;
 
-            let upgrade = pool.find(p => !usedIds.has(p.id) && !usedPersonaIds.has(p._personaId!) && p.rating > currentItem.rating && p.leagueId === currentItem.leagueId && (wasPosMatch ? Utils.normalizePos(p.preferredPosition) === slotPos : true));
+            let upgrade = pool.find(p => !usedIds.has(p.id) && !usedPersonaIds.has(p._personaId!) && p.rating > currentItem.rating && p.leagueId === currentItem.leagueId && (isChemSlot ? Utils.normalizePos(p.preferredPosition) === slotPos : true));
             if (!upgrade) upgrade = pool.find(p => !usedIds.has(p.id) && !usedPersonaIds.has(p._personaId!) && p.rating > currentItem.rating && p.leagueId === currentItem.leagueId);
 
             if (upgrade) {
-                console.log(`[BRIDGE] Upgrading Slot ${slot.index}: ${currentItem.rating} -> ${upgrade.rating}`);
                 usedIds.delete(currentItem.id); usedPersonaIds.delete(currentItem._personaId!);
                 selected[upIdx] = upgrade; usedIds.add(upgrade.id); usedPersonaIds.add(upgrade._personaId!);
+            } else break;
+        }
+    }
+
+    // --- DEEP CHECK 3: DOWNWARD RATING TRIMMING ---
+    if (targetRating > 0 && Utils.calculateRating(selected) > targetRating) {
+        log("Trimming excess rating...");
+        let trimAttempts = 0;
+        while (trimAttempts < 50) {
+            trimAttempts++;
+            const currentR = Utils.calculateRating(selected);
+            if (currentR <= targetRating) break;
+
+            const maxR = Math.max(...selected.filter(s => s).map(s => s!.rating));
+            const downIdx = selected.findIndex(s => s && s.rating === maxR);
+            if (downIdx === -1) break;
+            const currentItem = selected[downIdx]!;
+
+            // Find lowest rated valid replacement that doesn't drop us below target
+            const replacement = pool.find(p => !usedIds.has(p.id) && !usedPersonaIds.has(p._personaId!) && p.rating < currentItem.rating);
+            if (replacement) {
+                const temp = [...selected];
+                temp[downIdx] = replacement;
+                if (Utils.calculateRating(temp) >= targetRating) {
+                    console.log(`[TRIM] Downgrading ${currentItem.rating} -> ${replacement.rating}`);
+                    usedIds.delete(currentItem.id); usedPersonaIds.delete(currentItem._personaId!);
+                    selected[downIdx] = replacement; usedIds.add(replacement.id); usedPersonaIds.add(replacement._personaId!);
+                } else break;
             } else break;
         }
     }
@@ -123,6 +157,6 @@ export class LeagueSolver {
     activeSlots.forEach((slot: any, i: number) => { if (selected[i]) finalArray[slot.index] = selected[i]; });
     squad.setPlayers(finalArray);
     await Utils.saveSquad(challenge, squad, controller);
-    log(`✅ League Solve Complete.`);
+    log(`✅ Deep Solve Complete. Chem: ${getChem(selected)}`);
   }
 }
