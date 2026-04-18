@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC SBC Enhanced Builder
 // @namespace    fc-sbc-builder
-// @version      1.0.25
+// @version      1.0.26
 // @author       tomwang
 // @description  Optimal SBC builder with Storage-First priority
 // @license      ISC
@@ -929,34 +929,21 @@
       const hardReqs = [];
       (challenge.eligibilityRequirements || []).forEach((r2) => {
         const col = r2.kvPairs._collection || r2.kvPairs;
-        const keys = Object.keys(col).map((k2) => parseInt(k2));
-        const vals = Object.values(col).map((v2) => Utils.getCleanValue(v2)).flat();
-        if (keys.includes(19)) constraints.targetRating = Math.max(constraints.targetRating, r2.count || vals[0] || 0);
-        if (keys.includes(35)) constraints.targetChem = Math.max(constraints.targetChem, vals[0] || 0);
-        if (keys.includes(17) && (vals.includes(3) || vals.includes(17))) constraints.minGold = r2.count;
-        if (keys.includes(25) && (vals.includes(4) || vals.includes(25))) constraints.minRare = r2.count;
-        if (keys.includes(14)) vals.forEach((id) => hardReqs.push({ type: "club", id, count: r2.count || 1 }));
-        if (keys.includes(5)) {
-          const count = r2.count || (Array.isArray(vals) ? vals[0] : vals);
-          if (r2.scope === 1) constraints.maxSameNation = Math.min(constraints.maxSameNation, count);
-          else vals.forEach((id) => hardReqs.push({ type: "nation", id, count: r2.count || 1 }));
-        }
-        if (keys.includes(6)) {
-          const count = r2.count || (Array.isArray(vals) ? vals[0] : vals);
-          if (r2.scope === 1) constraints.maxSameLeague = Math.min(constraints.maxSameLeague, count);
-          else vals.forEach((id) => hardReqs.push({ type: "league", id, count: r2.count || 1 }));
-        }
-        if (keys.includes(15)) {
-          if (r2.count > 0 && r2.count < 11) {
-            if (r2.scope === 1) constraints.maxSameNation = Math.min(constraints.maxSameNation, r2.count);
-            else constraints.maxTotalNations = Math.min(constraints.maxTotalNations, r2.count);
-          }
-        }
-        if (keys.includes(12)) {
-          if (r2.count > 0 && r2.count < 11) {
-            if (r2.scope === 1) constraints.maxSameLeague = Math.min(constraints.maxSameLeague, r2.count);
-            else constraints.maxTotalLeagues = Math.min(constraints.maxTotalLeagues, r2.count);
-          }
+        for (let k2 in col) {
+          const key = parseInt(k2);
+          const val = Utils.getCleanValue(col[k2]);
+          const vals = Array.isArray(val) ? val : [val];
+          if (key === 19) constraints.targetRating = Math.max(constraints.targetRating, r2.count || vals[0] || 0);
+          if (key === 35 || key === 20) constraints.targetChem = Math.max(constraints.targetChem, vals[0] || 0);
+          if (key === 17 && vals.includes(3)) constraints.minGold = r2.count;
+          if (key === 25 && vals.includes(4)) constraints.minRare = r2.count;
+          if (key === 5 && r2.scope === 1) constraints.maxSameNation = vals[0];
+          if (key === 6 && r2.scope === 1) constraints.maxSameLeague = vals[0];
+          if (key === 9 && vals[0] === -1) constraints.maxTotalNations = r2.count;
+          if (key === 10 && vals[0] === -1) constraints.maxTotalLeagues = r2.count;
+          if (key === 14) vals.forEach((id) => hardReqs.push({ type: "club", id, count: r2.count || 1 }));
+          if (key === 15 && vals[0] > 0) vals.forEach((id) => hardReqs.push({ type: "nation", id, count: r2.count || 1 }));
+          if (key === 11 && vals[0] > 10) vals.forEach((id) => hardReqs.push({ type: "league", id, count: r2.count || 1 }));
         }
       });
       log(`Targets: ${constraints.targetChem} Chem | Nations: ${constraints.maxTotalNations} (MaxSame: ${constraints.maxSameNation})`);
@@ -1243,7 +1230,7 @@ u$1(
               className: "animate-in slide-in-from-left-4 fade-in duration-300",
               children: [
 u$1("div", { className: "flex justify-between items-center mb-6", children: [
-u$1("h2", { className: "text-xs font-black text-white tracking-widest uppercase opacity-60", children: "SBC Master V1.0.25" }),
+u$1("h2", { className: "text-xs font-black text-white tracking-widest uppercase opacity-60", children: "SBC Master V1.0.26" }),
 u$1(
                     "button",
                     {

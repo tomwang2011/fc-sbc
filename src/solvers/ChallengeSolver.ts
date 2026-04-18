@@ -19,39 +19,26 @@ export class ChallengeSolver {
 
     (challenge.eligibilityRequirements || []).forEach((r: any) => {
         const col = r.kvPairs._collection || r.kvPairs;
-        const keys = Object.keys(col).map(k => parseInt(k));
-        const vals = Object.values(col).map(v => Utils.getCleanValue(v)).flat();
-        
-        if (keys.includes(19)) constraints.targetRating = Math.max(constraints.targetRating, r.count || vals[0] || 0);
-        if (keys.includes(35)) constraints.targetChem = Math.max(constraints.targetChem, vals[0] || 0);
-        if (keys.includes(17) && (vals.includes(3) || vals.includes(17))) constraints.minGold = r.count;
-        if (keys.includes(25) && (vals.includes(4) || vals.includes(25))) constraints.minRare = r.count;
+        for (let k in col) {
+            const key = parseInt(k);
+            const val = Utils.getCleanValue(col[k]);
+            const vals = Array.isArray(val) ? val : [val];
 
-        // Specific Entity Requirements (Seeds)
-        if (keys.includes(14)) vals.forEach(id => hardReqs.push({ type: 'club', id, count: r.count || 1 }));
-        if (keys.includes(5)) {
-            const count = r.count || (Array.isArray(vals) ? vals[0] : vals);
-            if (r.scope === 1) constraints.maxSameNation = Math.min(constraints.maxSameNation, count);
-            else vals.forEach(id => hardReqs.push({ type: 'nation', id, count: r.count || 1 }));
-        }
-        if (keys.includes(6)) {
-            const count = r.count || (Array.isArray(vals) ? vals[0] : vals);
-            if (r.scope === 1) constraints.maxSameLeague = Math.min(constraints.maxSameLeague, count);
-            else vals.forEach(id => hardReqs.push({ type: 'league', id, count: r.count || 1 }));
-        }
+            if (key === 19) constraints.targetRating = Math.max(constraints.targetRating, r.count || vals[0] || 0);
+            if (key === 35 || key === 20) constraints.targetChem = Math.max(constraints.targetChem, vals[0] || 0);
+            if (key === 17 && vals.includes(3)) constraints.minGold = r.count;
+            if (key === 25 && vals.includes(4)) constraints.minRare = r.count;
 
-        // Diversity/Limits
-        if (keys.includes(15)) {
-            if (r.count > 0 && r.count < 11) {
-                if (r.scope === 1) constraints.maxSameNation = Math.min(constraints.maxSameNation, r.count);
-                else constraints.maxTotalNations = Math.min(constraints.maxTotalNations, r.count);
-            }
-        }
-        if (keys.includes(12)) {
-            if (r.count > 0 && r.count < 11) {
-                if (r.scope === 1) constraints.maxSameLeague = Math.min(constraints.maxSameLeague, r.count);
-                else constraints.maxTotalLeagues = Math.min(constraints.maxTotalLeagues, r.count);
-            }
+            // Diversity Mapping (Semantic)
+            if (key === 5 && r.scope === 1) constraints.maxSameNation = vals[0];
+            if (key === 6 && r.scope === 1) constraints.maxSameLeague = vals[0];
+            if (key === 9 && vals[0] === -1) constraints.maxTotalNations = r.count;
+            if (key === 10 && vals[0] === -1) constraints.maxTotalLeagues = r.count;
+
+            // Entity Mapping (Specific Seeds)
+            if (key === 14) vals.forEach(id => hardReqs.push({ type: 'club', id, count: r.count || 1 }));
+            if (key === 15 && vals[0] > 0) vals.forEach(id => hardReqs.push({ type: 'nation', id, count: r.count || 1 }));
+            if (key === 11 && vals[0] > 10) vals.forEach(id => hardReqs.push({ type: 'league', id, count: r.count || 1 }));
         }
     });
 
