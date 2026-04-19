@@ -4,6 +4,7 @@ import { EfficientSolver } from './solvers/EfficientSolver';
 import { ChallengeSolver } from './solvers/ChallengeSolver';
 import { SolverSettings } from './types';
 import { Inventory } from './core/Inventory';
+import { Utils } from './core/Utils';
 
 export class SbcBuilder {
   public static async primeInventory(targetLevels: string[] = []) {
@@ -28,5 +29,13 @@ export class SbcBuilder {
 
   public static async solveChallenge(log: (m: string) => void, settings: SolverSettings) {
     await ChallengeSolver.solve(log, settings);
+  }
+
+  public static async clearSquad() {
+    const ctx = Utils.getSbcContext();
+    if (!ctx) throw new Error("SBC Screen Not Found");
+    const { squad, challenge, controller } = ctx;
+    squad.setPlayers(new Array(23).fill(null));
+    await Utils.saveSquad(challenge, squad, controller);
   }
 }

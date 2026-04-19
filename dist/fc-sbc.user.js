@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC SBC Enhanced Builder
 // @namespace    fc-sbc-builder
-// @version      1.0.29
+// @version      1.0.30
 // @author       tomwang
 // @description  Optimal SBC builder with Storage-First priority
 // @license      ISC
@@ -97,7 +97,7 @@
   function S(n2) {
     return n2.children;
   }
-  function C$1(n2, l2) {
+  function C(n2, l2) {
     this.props = n2, this.context = l2;
   }
   function $(n2, l2) {
@@ -116,7 +116,7 @@
       if (null != l2 && null != l2.__e) return n2.__e = n2.__c.base = l2.__e;
     }), P(n2);
   }
-  function A$1(n2) {
+  function A(n2) {
     (!n2.__d && (n2.__d = true) && i$1.push(n2) && !H.__r++ || r$1 != l$1.debounceRendering) && ((r$1 = l$1.debounceRendering) || o$1)(H);
   }
   function H() {
@@ -127,11 +127,11 @@
     }
   }
   function L(n2, l2, u2, t2, i2, r2, o2, e2, f2, c2, s2) {
-    var a2, h2, p2, v2, y2, _2, g2, m2 = t2 && t2.__k || w$1, b2 = l2.length;
-    for (f2 = T$1(u2, l2, m2, f2, b2), a2 = 0; a2 < b2; a2++) null != (p2 = u2.__k[a2]) && (h2 = -1 != p2.__i && m2[p2.__i] || d$1, p2.__i = a2, _2 = q(n2, p2, h2, i2, r2, o2, e2, f2, c2, s2), v2 = p2.__e, p2.ref && h2.ref != p2.ref && (h2.ref && J(h2.ref, null, p2), s2.push(p2.ref, p2.__c || v2, p2)), null == y2 && null != v2 && (y2 = v2), (g2 = !!(4 & p2.__u)) || h2.__k === p2.__k ? (f2 = j$1(p2, f2, n2, g2), g2 && h2.__e && (h2.__e = null)) : "function" == typeof p2.type && void 0 !== _2 ? f2 = _2 : v2 && (f2 = v2.nextSibling), p2.__u &= -7);
-    return u2.__e = y2, f2;
+    var a2, h2, p2, v2, y, _2, g2, m2 = t2 && t2.__k || w$1, b2 = l2.length;
+    for (f2 = T(u2, l2, m2, f2, b2), a2 = 0; a2 < b2; a2++) null != (p2 = u2.__k[a2]) && (h2 = -1 != p2.__i && m2[p2.__i] || d$1, p2.__i = a2, _2 = q(n2, p2, h2, i2, r2, o2, e2, f2, c2, s2), v2 = p2.__e, p2.ref && h2.ref != p2.ref && (h2.ref && J(h2.ref, null, p2), s2.push(p2.ref, p2.__c || v2, p2)), null == y && null != v2 && (y = v2), (g2 = !!(4 & p2.__u)) || h2.__k === p2.__k ? (f2 = j$1(p2, f2, n2, g2), g2 && h2.__e && (h2.__e = null)) : "function" == typeof p2.type && void 0 !== _2 ? f2 = _2 : v2 && (f2 = v2.nextSibling), p2.__u &= -7);
+    return u2.__e = y, f2;
   }
-  function T$1(n2, l2, u2, t2, i2) {
+  function T(n2, l2, u2, t2, i2) {
     var r2, o2, e2, f2, c2, s2 = u2.length, a2 = s2, h2 = 0;
     for (n2.__k = new Array(i2), r2 = 0; r2 < i2; r2++) null != (o2 = l2[r2]) && "boolean" != typeof o2 && "function" != typeof o2 ? ("string" == typeof o2 || "number" == typeof o2 || "bigint" == typeof o2 || o2.constructor == String ? o2 = n2.__k[r2] = x(null, o2, null, null, null) : g(o2) ? o2 = n2.__k[r2] = x(S, { children: o2 }, null, null, null) : void 0 === o2.constructor && o2.__b > 0 ? o2 = n2.__k[r2] = x(o2.type, o2.props, o2.key, o2.ref ? o2.ref : null, o2.__v) : n2.__k[r2] = o2, f2 = r2 + h2, o2.__ = n2, o2.__b = n2.__b + 1, e2 = null, -1 != (c2 = o2.__i = O(o2, u2, f2, a2)) && (a2--, (e2 = u2[c2]) && (e2.__u |= 2)), null == e2 || null == e2.__v ? (-1 == c2 && (i2 > s2 ? h2-- : i2 < s2 && h2++), "function" != typeof o2.type && (o2.__u |= 4)) : c2 != f2 && (c2 == f2 - 1 ? h2-- : c2 == f2 + 1 ? h2++ : (c2 > f2 ? h2-- : h2++, o2.__u |= 4))) : n2.__k[r2] = null;
     if (a2) for (r2 = 0; r2 < s2; r2++) null != (e2 = u2[r2]) && 0 == (2 & e2.__u) && (e2.__e == t2 && (t2 = $(e2)), K(e2, e2));
@@ -189,11 +189,11 @@
     };
   }
   function q(n2, u2, t2, i2, r2, o2, e2, f2, c2, s2) {
-    var a2, h2, p2, v2, y2, d2, _2, k2, x2, M, $2, I2, P2, A2, H2, T2 = u2.type;
+    var a2, h2, p2, v2, y, d2, _2, k2, x2, M, $2, I2, P2, A2, H2, T2 = u2.type;
     if (void 0 !== u2.constructor) return null;
     128 & t2.__u && (c2 = !!(32 & t2.__u), o2 = [f2 = u2.__e = t2.__e]), (a2 = l$1.__b) && a2(u2);
     n: if ("function" == typeof T2) try {
-      if (k2 = u2.props, x2 = T2.prototype && T2.prototype.render, M = (a2 = T2.contextType) && i2[a2.__c], $2 = a2 ? M ? M.props.value : a2.__ : i2, t2.__c ? _2 = (h2 = u2.__c = t2.__c).__ = h2.__E : (x2 ? u2.__c = h2 = new T2(k2, $2) : (u2.__c = h2 = new C$1(k2, $2), h2.constructor = T2, h2.render = Q), M && M.sub(h2), h2.state || (h2.state = {}), h2.__n = i2, p2 = h2.__d = true, h2.__h = [], h2._sb = []), x2 && null == h2.__s && (h2.__s = h2.state), x2 && null != T2.getDerivedStateFromProps && (h2.__s == h2.state && (h2.__s = m$1({}, h2.__s)), m$1(h2.__s, T2.getDerivedStateFromProps(k2, h2.__s))), v2 = h2.props, y2 = h2.state, h2.__v = u2, p2) x2 && null == T2.getDerivedStateFromProps && null != h2.componentWillMount && h2.componentWillMount(), x2 && null != h2.componentDidMount && h2.__h.push(h2.componentDidMount);
+      if (k2 = u2.props, x2 = T2.prototype && T2.prototype.render, M = (a2 = T2.contextType) && i2[a2.__c], $2 = a2 ? M ? M.props.value : a2.__ : i2, t2.__c ? _2 = (h2 = u2.__c = t2.__c).__ = h2.__E : (x2 ? u2.__c = h2 = new T2(k2, $2) : (u2.__c = h2 = new C(k2, $2), h2.constructor = T2, h2.render = Q), M && M.sub(h2), h2.state || (h2.state = {}), h2.__n = i2, p2 = h2.__d = true, h2.__h = [], h2._sb = []), x2 && null == h2.__s && (h2.__s = h2.state), x2 && null != T2.getDerivedStateFromProps && (h2.__s == h2.state && (h2.__s = m$1({}, h2.__s)), m$1(h2.__s, T2.getDerivedStateFromProps(k2, h2.__s))), v2 = h2.props, y = h2.state, h2.__v = u2, p2) x2 && null == T2.getDerivedStateFromProps && null != h2.componentWillMount && h2.componentWillMount(), x2 && null != h2.componentDidMount && h2.__h.push(h2.componentDidMount);
       else {
         if (x2 && null == T2.getDerivedStateFromProps && k2 !== v2 && null != h2.componentWillReceiveProps && h2.componentWillReceiveProps(k2, $2), u2.__v == t2.__v || !h2.__e && null != h2.shouldComponentUpdate && false === h2.shouldComponentUpdate(k2, h2.__s, $2)) {
           u2.__v != t2.__v && (h2.props = k2, h2.state = h2.__s, h2.__d = false), u2.__e = t2.__e, u2.__k = t2.__k, u2.__k.some(function(n3) {
@@ -202,14 +202,14 @@
           break n;
         }
         null != h2.componentWillUpdate && h2.componentWillUpdate(k2, h2.__s, $2), x2 && null != h2.componentDidUpdate && h2.__h.push(function() {
-          h2.componentDidUpdate(v2, y2, d2);
+          h2.componentDidUpdate(v2, y, d2);
         });
       }
       if (h2.context = $2, h2.props = k2, h2.__P = n2, h2.__e = false, I2 = l$1.__r, P2 = 0, x2) h2.state = h2.__s, h2.__d = false, I2 && I2(u2), a2 = h2.render(h2.props, h2.state, h2.context), w$1.push.apply(h2.__h, h2._sb), h2._sb = [];
       else do {
         h2.__d = false, I2 && I2(u2), a2 = h2.render(h2.props, h2.state, h2.context), h2.state = h2.__s;
       } while (h2.__d && ++P2 < 25);
-      h2.state = h2.__s, null != h2.getChildContext && (i2 = m$1(m$1({}, i2), h2.getChildContext())), x2 && !p2 && null != h2.getSnapshotBeforeUpdate && (d2 = h2.getSnapshotBeforeUpdate(v2, y2)), A2 = null != a2 && a2.type === S && null == a2.key ? E(a2.props.children) : a2, f2 = L(n2, g(A2) ? A2 : [A2], u2, t2, i2, r2, o2, e2, f2, c2, s2), h2.base = u2.__e, u2.__u &= -161, h2.__h.length && e2.push(h2), _2 && (h2.__E = h2.__ = null);
+      h2.state = h2.__s, null != h2.getChildContext && (i2 = m$1(m$1({}, i2), h2.getChildContext())), x2 && !p2 && null != h2.getSnapshotBeforeUpdate && (d2 = h2.getSnapshotBeforeUpdate(v2, y)), A2 = null != a2 && a2.type === S && null == a2.key ? E(a2.props.children) : a2, f2 = L(n2, g(A2) ? A2 : [A2], u2, t2, i2, r2, o2, e2, f2, c2, s2), h2.base = u2.__e, u2.__u &= -161, h2.__h.length && e2.push(h2), _2 && (h2.__E = h2.__ = null);
     } catch (n3) {
       if (u2.__v = null, c2 || null != o2) if (n3.then) {
         for (u2.__u |= c2 ? 160 : 128; f2 && 8 == f2.nodeType && f2.nextSibling; ) f2 = f2.nextSibling;
@@ -243,10 +243,10 @@
     return "object" != typeof n2 || null == n2 || n2.__b > 0 ? n2 : g(n2) ? n2.map(E) : m$1({}, n2);
   }
   function G(u2, t2, i2, r2, o2, e2, f2, c2, s2) {
-    var a2, h2, p2, v2, y2, w2, _2, m2 = i2.props || d$1, k2 = t2.props, x2 = t2.type;
+    var a2, h2, p2, v2, y, w2, _2, m2 = i2.props || d$1, k2 = t2.props, x2 = t2.type;
     if ("svg" == x2 ? o2 = "http://www.w3.org/2000/svg" : "math" == x2 ? o2 = "http://www.w3.org/1998/Math/MathML" : o2 || (o2 = "http://www.w3.org/1999/xhtml"), null != e2) {
-      for (a2 = 0; a2 < e2.length; a2++) if ((y2 = e2[a2]) && "setAttribute" in y2 == !!x2 && (x2 ? y2.localName == x2 : 3 == y2.nodeType)) {
-        u2 = y2, e2[a2] = null;
+      for (a2 = 0; a2 < e2.length; a2++) if ((y = e2[a2]) && "setAttribute" in y == !!x2 && (x2 ? y.localName == x2 : 3 == y.nodeType)) {
+        u2 = y, e2[a2] = null;
         break;
       }
     }
@@ -256,9 +256,9 @@
     }
     if (null == x2) m2 === k2 || c2 && u2.data == k2 || (u2.data = k2);
     else {
-      if (e2 = e2 && n.call(u2.childNodes), !c2 && null != e2) for (m2 = {}, a2 = 0; a2 < u2.attributes.length; a2++) m2[(y2 = u2.attributes[a2]).name] = y2.value;
-      for (a2 in m2) y2 = m2[a2], "dangerouslySetInnerHTML" == a2 ? p2 = y2 : "children" == a2 || a2 in k2 || "value" == a2 && "defaultValue" in k2 || "checked" == a2 && "defaultChecked" in k2 || N(u2, a2, null, y2, o2);
-      for (a2 in k2) y2 = k2[a2], "children" == a2 ? v2 = y2 : "dangerouslySetInnerHTML" == a2 ? h2 = y2 : "value" == a2 ? w2 = y2 : "checked" == a2 ? _2 = y2 : c2 && "function" != typeof y2 || m2[a2] === y2 || N(u2, a2, y2, m2[a2], o2);
+      if (e2 = e2 && n.call(u2.childNodes), !c2 && null != e2) for (m2 = {}, a2 = 0; a2 < u2.attributes.length; a2++) m2[(y = u2.attributes[a2]).name] = y.value;
+      for (a2 in m2) y = m2[a2], "dangerouslySetInnerHTML" == a2 ? p2 = y : "children" == a2 || a2 in k2 || "value" == a2 && "defaultValue" in k2 || "checked" == a2 && "defaultChecked" in k2 || N(u2, a2, null, y, o2);
+      for (a2 in k2) y = k2[a2], "children" == a2 ? v2 = y : "dangerouslySetInnerHTML" == a2 ? h2 = y : "value" == a2 ? w2 = y : "checked" == a2 ? _2 = y : c2 && "function" != typeof y || m2[a2] === y || N(u2, a2, y, m2[a2], o2);
       if (h2) c2 || p2 && (h2.__html == p2.__html || h2.__html == u2.innerHTML) || (u2.innerHTML = h2.__html), t2.__k = [];
       else if (p2 && (u2.innerHTML = ""), L("template" == t2.type ? u2.content : u2, g(v2) ? v2 : [v2], t2, i2, r2, "foreignObject" == x2 ? "http://www.w3.org/1999/xhtml" : o2, e2, f2, e2 ? e2[0] : i2.__k && $(i2, 0), c2, s2), null != e2) for (a2 = e2.length; a2--; ) b(e2[a2]);
       c2 || (a2 = "value", "progress" == x2 && null == w2 ? u2.removeAttribute("value") : null != w2 && (w2 !== u2[a2] || "progress" == x2 && !w2 || "option" == x2 && w2 != m2[a2]) && N(u2, a2, w2, m2[a2], o2), a2 = "checked", null != _2 && _2 != u2[a2] && N(u2, a2, _2, m2[a2], o2));
@@ -302,12 +302,12 @@
       n2 = l3;
     }
     throw n2;
-  } }, u$2 = 0, C$1.prototype.setState = function(n2, l2) {
+  } }, u$2 = 0, C.prototype.setState = function(n2, l2) {
     var u2;
-    u2 = null != this.__s && this.__s != this.state ? this.__s : this.__s = m$1({}, this.state), "function" == typeof n2 && (n2 = n2(m$1({}, u2), this.props)), n2 && m$1(u2, n2), null != n2 && this.__v && (l2 && this._sb.push(l2), A$1(this));
-  }, C$1.prototype.forceUpdate = function(n2) {
-    this.__v && (this.__e = true, n2 && this.__h.push(n2), A$1(this));
-  }, C$1.prototype.render = S, i$1 = [], o$1 = "function" == typeof Promise ? Promise.prototype.then.bind(Promise.resolve()) : setTimeout, e$1 = function(n2, l2) {
+    u2 = null != this.__s && this.__s != this.state ? this.__s : this.__s = m$1({}, this.state), "function" == typeof n2 && (n2 = n2(m$1({}, u2), this.props)), n2 && m$1(u2, n2), null != n2 && this.__v && (l2 && this._sb.push(l2), A(this));
+  }, C.prototype.forceUpdate = function(n2) {
+    this.__v && (this.__e = true, n2 && this.__h.push(n2), A(this));
+  }, C.prototype.render = S, i$1 = [], o$1 = "function" == typeof Promise ? Promise.prototype.then.bind(Promise.resolve()) : setTimeout, e$1 = function(n2, l2) {
     return n2.__v.__b - l2.__v.__b;
   }, H.__r = 0, f$2 = Math.random().toString(8), c$1 = "__d" + f$2, s$1 = "__a" + f$2, a$1 = /(PointerCapture)$|Capture$/i, h$1 = 0, p$1 = V(false), v$1 = V(true);
   var f$1 = 0;
@@ -361,19 +361,6 @@
       }, r.shouldComponentUpdate = f2;
     }
     return o2.__N || o2.__;
-  }
-  function y(n2, u2) {
-    var i2 = p(t++, 3);
-    !c.__s && C(i2.__H, u2) && (i2.__ = n2, i2.u = u2, r.__H.__h.push(i2));
-  }
-  function A(n2) {
-    return o = 5, T(function() {
-      return { current: n2 };
-    }, []);
-  }
-  function T(n2, r2) {
-    var u2 = p(t++, 7);
-    return C(u2.__H, r2) && (u2.__ = n2(), u2.__H = r2, u2.__h = n2), u2.__;
   }
   function j() {
     for (var n2; n2 = f.shift(); ) {
@@ -438,11 +425,6 @@
   function B(n2) {
     var t2 = r;
     n2.__c = n2.__(), r = t2;
-  }
-  function C(n2, t2) {
-    return !n2 || n2.length !== t2.length || t2.some(function(t3, r2) {
-      return t3 !== n2[r2];
-    });
   }
   function D(n2, t2) {
     return "function" == typeof t2 ? t2(n2) : t2;
@@ -1128,6 +1110,13 @@
     static async solveChallenge(log, settings) {
       await ChallengeSolver.solve(log, settings);
     }
+    static async clearSquad() {
+      const ctx = Utils.getSbcContext();
+      if (!ctx) throw new Error("SBC Screen Not Found");
+      const { squad, challenge, controller } = ctx;
+      squad.setPlayers(new Array(23).fill(null));
+      await Utils.saveSquad(challenge, squad, controller);
+    }
   }
   function App() {
     const [isOpen, setIsOpen] = d(false);
@@ -1137,10 +1126,6 @@
     const [stats, setStats] = d({ total: 0, sbcStorage: 0, unassigned: 0 });
     const [untradOnly, setUntradOnly] = d(true);
     const [excludedLeagues, setExcludedLeagues] = d([]);
-    const [position, setPosition] = d({ x: 8, y: window.innerHeight / 2 });
-    const [isDragging, setIsDragging] = d(false);
-    const dragStart = A({ x: 0, y: 0 });
-    const dragMoved = A(false);
     const leagues = [
       { id: 13, name: "PL" },
       { id: 53, name: "ESP1" },
@@ -1151,38 +1136,6 @@
       { id: 308, name: "POR1" },
       { id: 4, name: "BEL1" }
     ];
-    const handleMouseDown = (e2) => {
-      if (isOpen) return;
-      setIsDragging(true);
-      dragMoved.current = false;
-      dragStart.current = {
-        x: e2.clientX - position.x,
-        y: e2.clientY - position.y
-      };
-      e2.preventDefault();
-    };
-    y(() => {
-      const handleMouseMove = (e2) => {
-        if (!isDragging) return;
-        const newX = e2.clientX - dragStart.current.x;
-        const newY = e2.clientY - dragStart.current.y;
-        if (Math.abs(newX - position.x) > 2 || Math.abs(newY - position.y) > 2) {
-          dragMoved.current = true;
-        }
-        setPosition({ x: newX, y: newY });
-      };
-      const handleMouseUp = () => {
-        setIsDragging(false);
-      };
-      if (isDragging) {
-        window.addEventListener("mousemove", handleMouseMove);
-        window.addEventListener("mouseup", handleMouseUp);
-      }
-      return () => {
-        window.removeEventListener("mousemove", handleMouseMove);
-        window.removeEventListener("mouseup", handleMouseUp);
-      };
-    }, [isDragging, position.x, position.y]);
     const toggleLeague = (id) => {
       setExcludedLeagues((prev) => prev.includes(id) ? prev.filter((l2) => l2 !== id) : [...prev, id]);
     };
@@ -1198,6 +1151,15 @@
         setStatus("❌ Sync Failed.");
       } finally {
         setIsScanning(false);
+      }
+    };
+    const handleClear = async () => {
+      setStatus("Clearing...");
+      try {
+        await SbcBuilder.clearSquad();
+        setStatus("Squad Cleared.");
+      } catch (e2) {
+        setStatus(`❌ Error: ${e2.message}`);
       }
     };
     const runSolver = async (type) => {
@@ -1229,8 +1191,9 @@
       {
         style: {
           position: "fixed",
-          top: `${position.y}px`,
-          left: `${position.x}px`,
+          top: "50%",
+          left: "8px",
+          transform: "translateY(-50%)",
           pointerEvents: "auto",
           zIndex: 2147483647
         },
@@ -1239,9 +1202,7 @@
 u$1(
             "button",
             {
-              onMouseDown: (e2) => handleMouseDown(e2),
               onClick: () => {
-                if (dragMoved.current) return;
                 setIsOpen(!isOpen);
                 if (!isOpen && stats.total === 0) handleScan();
               },
@@ -1256,8 +1217,8 @@ u$1(
                 borderRadius: "50%",
                 color: "white",
                 border: "2px solid rgba(255,255,255,0.4)",
-                cursor: isDragging ? "grabbing" : "grab",
-                transition: isDragging ? "none" : "background-color 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
+                cursor: "pointer",
+                transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
                 opacity: "1 !important"
               },
               children: u$1("span", { style: { fontSize: "24px", fontWeight: "900" }, children: isOpen ? "✕" : "⚡" })
@@ -1273,7 +1234,7 @@ u$1(
                 width: "calc(100vw - 24px)",
                 maxWidth: "320px",
                 position: "absolute",
-                top: "0",
+                top: "50%",
                 left: "60px",
                 transform: "translateY(-50%)",
                 borderRadius: "20px",
@@ -1284,17 +1245,28 @@ u$1(
               className: "animate-in slide-in-from-left-4 fade-in duration-300",
               children: [
 u$1("div", { className: "flex justify-between items-center mb-6", children: [
-u$1("h2", { className: "text-xs font-black text-white tracking-widest uppercase opacity-60", children: "SBC Master V1.0.29" }),
+u$1("h2", { className: "text-xs font-black text-white tracking-widest uppercase opacity-60", children: "SBC Master V1.0.30" }),
+u$1("div", { className: "flex gap-2", children: [
 u$1(
-                    "button",
-                    {
-                      onClick: handleScan,
-                      disabled: isScanning,
-                      style: { background: "#18181b", borderRadius: "8px", border: "1px solid #27272a" },
-                      className: `p-2 ${isScanning ? "animate-spin opacity-50" : ""} text-zinc-400`,
-                      children: "🔄"
-                    }
-                  )
+                      "button",
+                      {
+                        onClick: handleClear,
+                        style: { background: "#18181b", borderRadius: "8px", border: "1px solid #27272a" },
+                        className: "p-2 text-[10px] font-bold text-zinc-400 hover:text-white transition-colors",
+                        children: "CLEAR"
+                      }
+                    ),
+u$1(
+                      "button",
+                      {
+                        onClick: handleScan,
+                        disabled: isScanning,
+                        style: { background: "#18181b", borderRadius: "8px", border: "1px solid #27272a" },
+                        className: `p-2 ${isScanning ? "animate-spin opacity-50" : ""} text-zinc-400`,
+                        children: "🔄"
+                      }
+                    )
+                  ] })
                 ] }),
 u$1("div", { className: "space-y-5", children: [
 u$1("div", { className: "grid grid-cols-3 gap-2.5", children: [

@@ -9,58 +9,11 @@ export function App() {
   const [stats, setStats] = useState({ total: 0, sbcStorage: 0, unassigned: 0 });
   const [untradOnly, setUntradOnly] = useState(true);
   const [excludedLeagues, setExcludedLeagues] = useState<number[]>([]);
-  
-  // Draggable State
-  const [position, setPosition] = useState({ x: 8, y: window.innerHeight / 2 });
-  const [isDragging, setIsDragging] = useState(false);
-  const dragStart = useRef({ x: 0, y: 0 });
-  const dragMoved = useRef(false);
 
   const leagues = [
     { id: 13, name: 'PL' }, { id: 53, name: 'ESP1' }, { id: 19, name: 'GER1' }, { id: 31, name: 'ITA1' },
     { id: 16, name: 'FRA1' }, { id: 10, name: 'NED1' }, { id: 308, name: 'POR1' }, { id: 4, name: 'BEL1' }
   ];
-
-  const handleMouseDown = (e: MouseEvent) => {
-    if (isOpen) return;
-    setIsDragging(true);
-    dragMoved.current = false;
-    dragStart.current = {
-        x: e.clientX - position.x,
-        y: e.clientY - position.y
-    };
-    e.preventDefault();
-  };
-
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-        if (!isDragging) return;
-        
-        const newX = e.clientX - dragStart.current.x;
-        const newY = e.clientY - dragStart.current.y;
-        
-        // Simple threshold to distinguish click vs drag
-        if (Math.abs(newX - position.x) > 2 || Math.abs(newY - position.y) > 2) {
-            dragMoved.current = true;
-        }
-
-        setPosition({ x: newX, y: newY });
-    };
-
-    const handleMouseUp = () => {
-        setIsDragging(false);
-    };
-
-    if (isDragging) {
-        window.addEventListener('mousemove', handleMouseMove);
-        window.addEventListener('mouseup', handleMouseUp);
-    }
-
-    return () => {
-        window.removeEventListener('mousemove', handleMouseMove);
-        window.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, [isDragging, position.x, position.y]);
 
   const toggleLeague = (id: number) => {
     setExcludedLeagues(prev => prev.includes(id) ? prev.filter(l => l !== id) : [...prev, id]);
@@ -78,6 +31,16 @@ export function App() {
       setStatus('❌ Sync Failed.');
     } finally {
       setIsScanning(false);
+    }
+  };
+
+  const handleClear = async () => {
+    setStatus('Clearing...');
+    try {
+        await SbcBuilder.clearSquad();
+        setStatus('Squad Cleared.');
+    } catch (e: any) {
+        setStatus(`❌ Error: ${e.message}`);
     }
   };
 
@@ -110,8 +73,9 @@ export function App() {
     <div 
         style={{ 
             position: 'fixed', 
-            top: `${position.y}px`, 
-            left: `${position.x}px`, 
+            top: '50%', 
+            left: '8px', 
+            transform: 'translateY(-50%)',
             pointerEvents: 'auto',
             zIndex: 2147483647
         }}
@@ -119,9 +83,7 @@ export function App() {
     >
       {/* Floating Toggle Bubble - Left Side */}
       <button
-        onMouseDown={(e) => handleMouseDown(e as any)}
         onClick={() => {
-            if (dragMoved.current) return; // Don't toggle if we were dragging
             setIsOpen(!isOpen);
             if (!isOpen && stats.total === 0) handleScan();
         }}
@@ -135,8 +97,8 @@ export function App() {
             borderRadius: '50%',
             color: 'white',
             border: '2px solid rgba(255,255,255,0.4)',
-            cursor: isDragging ? 'grabbing' : 'grab',
-            transition: isDragging ? 'none' : 'background-color 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+            cursor: 'pointer',
+            transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
             opacity: '1 !important'
         }}
       >
@@ -153,7 +115,7 @@ export function App() {
                 width: 'calc(100vw - 24px)',
                 maxWidth: '320px',
                 position: 'absolute',
-                top: '0',
+                top: '50%',
                 left: '60px',
                 transform: 'translateY(-50%)',
                 borderRadius: '20px',
@@ -164,15 +126,24 @@ export function App() {
             className="animate-in slide-in-from-left-4 fade-in duration-300"
         >
           <div className="flex justify-between items-center mb-6">
-            <h2 className="text-xs font-black text-white tracking-widest uppercase opacity-60">SBC Master V1.0.29</h2>
-            <button 
-              onClick={handleScan}
-              disabled={isScanning}
-              style={{ background: '#18181b', borderRadius: '8px', border: '1px solid #27272a' }}
-              className={`p-2 ${isScanning ? 'animate-spin opacity-50' : ''} text-zinc-400`}
-            >
-              🔄
-            </button>
+            <h2 className="text-xs font-black text-white tracking-widest uppercase opacity-60">SBC Master V1.0.30</h2>
+            <div className="flex gap-2">
+                <button 
+                  onClick={handleClear}
+                  style={{ background: '#18181b', borderRadius: '8px', border: '1px solid #27272a' }}
+                  className="p-2 text-[10px] font-bold text-zinc-400 hover:text-white transition-colors"
+                >
+                  CLEAR
+                </button>
+                <button 
+                  onClick={handleScan}
+                  disabled={isScanning}
+                  style={{ background: '#18181b', borderRadius: '8px', border: '1px solid #27272a' }}
+                  className={`p-2 ${isScanning ? 'animate-spin opacity-50' : ''} text-zinc-400`}
+                >
+                  🔄
+                </button>
+            </div>
           </div>
           
           <div className="space-y-5">
