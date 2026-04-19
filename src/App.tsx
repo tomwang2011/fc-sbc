@@ -1,4 +1,4 @@
-import { useState } from 'preact/hooks';
+import { useState, useEffect, useRef } from 'preact/hooks';
 import { SbcBuilder } from './SbcBuilder';
 
 export function App() {
@@ -9,11 +9,50 @@ export function App() {
   const [stats, setStats] = useState({ total: 0, sbcStorage: 0, unassigned: 0 });
   const [untradOnly, setUntradOnly] = useState(true);
   const [excludedLeagues, setExcludedLeagues] = useState<number[]>([]);
+  
+  // Draggable State
+  const [position, setPosition] = useState({ x: 8, y: window.innerHeight / 2 });
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStart = useRef({ x: 0, y: 0 });
+  const bubbleRef = useRef<HTMLDivElement>(null);
 
   const leagues = [
     { id: 13, name: 'PL' }, { id: 53, name: 'ESP1' }, { id: 19, name: 'GER1' }, { id: 31, name: 'ITA1' },
     { id: 16, name: 'FRA1' }, { id: 10, name: 'NED1' }, { id: 308, name: 'POR1' }, { id: 4, name: 'BEL1' }
   ];
+
+  const handleMouseDown = (e: MouseEvent) => {
+    if (isOpen) return; // Disable drag when open
+    setIsDragging(true);
+    dragStart.current = {
+        x: e.clientX - position.x,
+        y: e.clientY - position.y
+    };
+  };
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+        if (!isDragging) return;
+        setPosition({
+            x: e.clientX - dragStart.current.x,
+            y: e.clientY - dragStart.current.y
+        });
+    };
+
+    const handleMouseUp = () => {
+        setIsDragging(false);
+    };
+
+    if (isDragging) {
+        window.addEventListener('mousemove', handleMouseMove);
+        window.addEventListener('mouseup', handleMouseUp);
+    }
+
+    return () => {
+        window.removeEventListener('mousemove', handleMouseMove);
+        window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDragging]);
 
   const toggleLeague = (id: number) => {
     setExcludedLeagues(prev => prev.includes(id) ? prev.filter(l => l !== id) : [...prev, id]);
@@ -61,11 +100,11 @@ export function App() {
 
   return (
     <div 
+        ref={bubbleRef}
         style={{ 
             position: 'fixed', 
-            top: '50%', 
-            left: '8px', 
-            transform: 'translateY(-50%)', 
+            top: `${position.y}px`, 
+            left: `${position.x}px`, 
             pointerEvents: 'auto',
             zIndex: 2147483647
         }}
@@ -73,7 +112,9 @@ export function App() {
     >
       {/* Floating Toggle Bubble - Left Side */}
       <button
+        onMouseDown={(e) => handleMouseDown(e as any)}
         onClick={() => {
+            if (isDragging) return;
             setIsOpen(!isOpen);
             if (!isOpen && stats.total === 0) handleScan();
         }}
@@ -87,8 +128,8 @@ export function App() {
             borderRadius: '50%',
             color: 'white',
             border: '2px solid rgba(255,255,255,0.4)',
-            cursor: 'pointer',
-            transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+            cursor: isDragging ? 'grabbing' : 'grab',
+            transition: isDragging ? 'none' : 'background-color 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
             opacity: '1 !important'
         }}
       >
@@ -116,7 +157,7 @@ export function App() {
             className="animate-in slide-in-from-left-4 fade-in duration-300"
         >
           <div className="flex justify-between items-center mb-6">
-            <h2 className="text-xs font-black text-white tracking-widest uppercase opacity-60">SBC Master V1.0.27</h2>
+            <h2 className="text-xs font-black text-white tracking-widest uppercase opacity-60">SBC Master V1.0.28</h2>
             <button 
               onClick={handleScan}
               disabled={isScanning}
