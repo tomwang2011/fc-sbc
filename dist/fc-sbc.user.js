@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC SBC Enhanced Builder
 // @namespace    fc-sbc-builder
-// @version      1.0.28
+// @version      1.0.29
 // @author       tomwang
 // @description  Optimal SBC builder with Storage-First priority
 // @license      ISC
@@ -1140,7 +1140,7 @@
     const [position, setPosition] = d({ x: 8, y: window.innerHeight / 2 });
     const [isDragging, setIsDragging] = d(false);
     const dragStart = A({ x: 0, y: 0 });
-    const bubbleRef = A(null);
+    const dragMoved = A(false);
     const leagues = [
       { id: 13, name: "PL" },
       { id: 53, name: "ESP1" },
@@ -1154,18 +1154,22 @@
     const handleMouseDown = (e2) => {
       if (isOpen) return;
       setIsDragging(true);
+      dragMoved.current = false;
       dragStart.current = {
         x: e2.clientX - position.x,
         y: e2.clientY - position.y
       };
+      e2.preventDefault();
     };
     y(() => {
       const handleMouseMove = (e2) => {
         if (!isDragging) return;
-        setPosition({
-          x: e2.clientX - dragStart.current.x,
-          y: e2.clientY - dragStart.current.y
-        });
+        const newX = e2.clientX - dragStart.current.x;
+        const newY = e2.clientY - dragStart.current.y;
+        if (Math.abs(newX - position.x) > 2 || Math.abs(newY - position.y) > 2) {
+          dragMoved.current = true;
+        }
+        setPosition({ x: newX, y: newY });
       };
       const handleMouseUp = () => {
         setIsDragging(false);
@@ -1178,7 +1182,7 @@
         window.removeEventListener("mousemove", handleMouseMove);
         window.removeEventListener("mouseup", handleMouseUp);
       };
-    }, [isDragging]);
+    }, [isDragging, position.x, position.y]);
     const toggleLeague = (id) => {
       setExcludedLeagues((prev) => prev.includes(id) ? prev.filter((l2) => l2 !== id) : [...prev, id]);
     };
@@ -1223,7 +1227,6 @@
     return u$1(
       "div",
       {
-        ref: bubbleRef,
         style: {
           position: "fixed",
           top: `${position.y}px`,
@@ -1238,7 +1241,7 @@ u$1(
             {
               onMouseDown: (e2) => handleMouseDown(e2),
               onClick: () => {
-                if (isDragging) return;
+                if (dragMoved.current) return;
                 setIsOpen(!isOpen);
                 if (!isOpen && stats.total === 0) handleScan();
               },
@@ -1270,7 +1273,7 @@ u$1(
                 width: "calc(100vw - 24px)",
                 maxWidth: "320px",
                 position: "absolute",
-                top: "50%",
+                top: "0",
                 left: "60px",
                 transform: "translateY(-50%)",
                 borderRadius: "20px",
@@ -1281,7 +1284,7 @@ u$1(
               className: "animate-in slide-in-from-left-4 fade-in duration-300",
               children: [
 u$1("div", { className: "flex justify-between items-center mb-6", children: [
-u$1("h2", { className: "text-xs font-black text-white tracking-widest uppercase opacity-60", children: "SBC Master V1.0.28" }),
+u$1("h2", { className: "text-xs font-black text-white tracking-widest uppercase opacity-60", children: "SBC Master V1.0.29" }),
 u$1(
                     "button",
                     {

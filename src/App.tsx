@@ -14,7 +14,7 @@ export function App() {
   const [position, setPosition] = useState({ x: 8, y: window.innerHeight / 2 });
   const [isDragging, setIsDragging] = useState(false);
   const dragStart = useRef({ x: 0, y: 0 });
-  const bubbleRef = useRef<HTMLDivElement>(null);
+  const dragMoved = useRef(false);
 
   const leagues = [
     { id: 13, name: 'PL' }, { id: 53, name: 'ESP1' }, { id: 19, name: 'GER1' }, { id: 31, name: 'ITA1' },
@@ -22,21 +22,29 @@ export function App() {
   ];
 
   const handleMouseDown = (e: MouseEvent) => {
-    if (isOpen) return; // Disable drag when open
+    if (isOpen) return;
     setIsDragging(true);
+    dragMoved.current = false;
     dragStart.current = {
         x: e.clientX - position.x,
         y: e.clientY - position.y
     };
+    e.preventDefault();
   };
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
         if (!isDragging) return;
-        setPosition({
-            x: e.clientX - dragStart.current.x,
-            y: e.clientY - dragStart.current.y
-        });
+        
+        const newX = e.clientX - dragStart.current.x;
+        const newY = e.clientY - dragStart.current.y;
+        
+        // Simple threshold to distinguish click vs drag
+        if (Math.abs(newX - position.x) > 2 || Math.abs(newY - position.y) > 2) {
+            dragMoved.current = true;
+        }
+
+        setPosition({ x: newX, y: newY });
     };
 
     const handleMouseUp = () => {
@@ -52,7 +60,7 @@ export function App() {
         window.removeEventListener('mousemove', handleMouseMove);
         window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isDragging]);
+  }, [isDragging, position.x, position.y]);
 
   const toggleLeague = (id: number) => {
     setExcludedLeagues(prev => prev.includes(id) ? prev.filter(l => l !== id) : [...prev, id]);
@@ -100,7 +108,6 @@ export function App() {
 
   return (
     <div 
-        ref={bubbleRef}
         style={{ 
             position: 'fixed', 
             top: `${position.y}px`, 
@@ -114,7 +121,7 @@ export function App() {
       <button
         onMouseDown={(e) => handleMouseDown(e as any)}
         onClick={() => {
-            if (isDragging) return;
+            if (dragMoved.current) return; // Don't toggle if we were dragging
             setIsOpen(!isOpen);
             if (!isOpen && stats.total === 0) handleScan();
         }}
@@ -146,7 +153,7 @@ export function App() {
                 width: 'calc(100vw - 24px)',
                 maxWidth: '320px',
                 position: 'absolute',
-                top: '50%',
+                top: '0',
                 left: '60px',
                 transform: 'translateY(-50%)',
                 borderRadius: '20px',
@@ -157,7 +164,7 @@ export function App() {
             className="animate-in slide-in-from-left-4 fade-in duration-300"
         >
           <div className="flex justify-between items-center mb-6">
-            <h2 className="text-xs font-black text-white tracking-widest uppercase opacity-60">SBC Master V1.0.28</h2>
+            <h2 className="text-xs font-black text-white tracking-widest uppercase opacity-60">SBC Master V1.0.29</h2>
             <button 
               onClick={handleScan}
               disabled={isScanning}
