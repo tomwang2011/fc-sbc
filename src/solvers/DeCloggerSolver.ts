@@ -1,6 +1,7 @@
 import { EAItem, SolverSettings } from '../types';
 import { Utils } from '../core/Utils';
 import { Inventory } from '../core/Inventory';
+import { SbcParser } from '../core/SbcParser';
 
 export class DeCloggerSolver {
   public static async solve(log: (m: string) => void, settings: SolverSettings) {
@@ -9,20 +10,11 @@ export class DeCloggerSolver {
     const { challenge, squad, controller } = ctx;
 
     log("Analyzing Requirements...");
-    let isTotwRequired = false;
-    let targetRating = 0;
-    (challenge.eligibilityRequirements || []).forEach((r: any) => {
-        const col = r.kvPairs._collection || r.kvPairs;
-        for (let k in col) {
-            const val = Utils.getCleanValue(col[k]);
-            const key = parseInt(k);
-            if (key === 18 && (val === 3 || (Array.isArray(val) && val.includes(3)))) isTotwRequired = true;
-            if (key === 19) targetRating = Math.max(targetRating, Number(Array.isArray(val) ? val[0] : val) || 0);
-        }
-    });
+    const summary = SbcParser.parseCurrentSbc();
+    if (!summary) return log("❌ Failed to parse SBC requirements");
 
-    log(`Target: ${targetRating} OVR | TOTW Required: ${isTotwRequired}`);
-    await Inventory.primeInventory(isTotwRequired ? ['special'] : ['gold']);
+    log(`Target: ${summary.minRating} OVR | Special Required: ${summary.isTotw || summary.isTots}`);
+    await Inventory.primeInventory(summary.isTotw || summary.isTots ? ['special'] : ['gold']);
 
     const pool = Inventory.memory.filter(p => {
         if (settings.untradOnly && p.tradable === true) return false;
@@ -36,24 +28,26 @@ export class DeCloggerSolver {
     const activeSlots = squad.getSBCSlots().filter((s: any) => !s.isBrick() && s.index <= 10);
     const selected: (EAItem | null)[] = new Array(activeSlots.length).fill(null);
 
-    // 1. Mandatory Anchor
+    // 1. Mandatory Anchor (Special Card)
     let anchorRating = 87;
-    if (targetRating === 83) anchorRating = 83;
-    else if (targetRating === 84) anchorRating = 84;
-    else if (targetRating >= 85) anchorRating = 87;
-    if (targetRating >= 86) anchorRating = 88;
+    if (summary.minRating === 83) anchorRating = 83;
+    else if (summary.minRating === 84) anchorRating = 84;
+    else if (summary.minRating >= 85) anchorRating = 87;
+    if (summary.minRating >= 86) anchorRating = 88;
 
-    let anchor = isTotwRequired ? pool.find(p => p.rarityId === 3 || p.rareflag === 3) : pool.find(p => p.rating === anchorRating && p.rareflag === 1);
-    if (!anchor && !isTotwRequired && anchorRating > 83) {
-        // Fallback for anchor if exact rating not found
+    let anchor = (summary.isTotw || summary.isTots) ? 
+        pool.find(p => p.rarityId === 3 || p.rareflag === 3 || p.rarityId === 44 || p.rareflag === 44) : 
+        pool.find(p => p.rating === anchorRating && p.rareflag === 1);
+    
+    if (!anchor && !(summary.isTotw || summary.isTots) && anchorRating > 83) {
         anchor = pool.find(p => p.rating >= anchorRating && p.rating <= 88 && p.rareflag === 1);
     }
 
     if (anchor) {
         console.log(`[DECISION] Anchor: ${anchor._staticData?.name} (${anchor.rating}) [Source: ${anchor._sourceType}]`);
         selected[0] = anchor; usedIds.add(anchor.id); usedPersonaIds.add(anchor._personaId!);
-    } else if (isTotwRequired) {
-        return log("❌ No Untradeable TOTW found.");
+    } else if (summary.isTotw || summary.isTots) {
+        return log("❌ No Untradeable TOTW/TOTS found.");
     }
 
     // 2. Pattern Fill
@@ -61,9 +55,9 @@ export class DeCloggerSolver {
     pool.forEach(p => { if (p._sourceType === 'storage' && (p.rating === 83 || p.rating === 84)) (clogs as any)[p.rating]++; });
     
     let pattern: { r: number, c: number }[] = [];
-    if (targetRating === 83) {
+    if (summary.minRating === 83) {
         pattern = [{ r: 83, c: 10 }];
-    } else if (targetRating === 84) {
+    } else if (summary.minRating === 84) {
         pattern = [{ r: 84, c: 10 }];
     } else {
         pattern = (anchor && anchor.rating >= 88) ? [{ r: 83, c: 10 }] : (clogs[84] >= 6 ? [{ r: 84, c: 6 }, { r: 83, c: 4 }] : [{ r: 87, c: 1 }, { r: 83, c: 9 }]);
@@ -100,14 +94,14 @@ export class DeCloggerSolver {
     });
 
     // --- DOWNWARD OPTIMIZATION PASS ---
-    if (targetRating > 0) {
+    if (summary.minRating > 0) {
         log("Optimizing fodder usage...");
         let optAttempts = 0;
         // Increase attempts and ensure we check the whole pool for 81/82s
         while (optAttempts < 100) {
             optAttempts++;
             const currentRating = Utils.calculateRating(selected);
-            if (currentRating <= targetRating) break;
+            if (currentRating <= summary.minRating) break;
 
             // Target the highest rated non-anchor card
             const ratings = selected.map((s, idx) => ({ rating: s!.rating, index: idx, sourceType: s!._sourceType })).filter(x => x.index !== 0);
@@ -130,14 +124,14 @@ export class DeCloggerSolver {
                 tempSquad[downIdx] = downgrade;
                 const newRating = Utils.calculateRating(tempSquad);
                 // Accept the downgrade if it brings us closer to or hits the target
-                if (newRating >= targetRating || (currentRating > targetRating && newRating < currentRating)) {
+                if (newRating >= summary.minRating || (currentRating > summary.minRating && newRating < currentRating)) {
                     console.log(`[OPTIMIZE] Downgrading Slot ${downIdx}: ${currentItem.rating} -> ${downgrade.rating} to offset high-rated cards.`);
                     usedIds.delete(currentItem.id); usedPersonaIds.delete(currentItem._personaId!);
                     selected[downIdx] = downgrade;
                     usedIds.add(downgrade.id); usedPersonaIds.add(downgrade._personaId!);
                     
                     // If we hit target exactly, we can stop
-                    if (newRating === targetRating) break;
+                    if (newRating === summary.minRating) break;
                 } else {
                     // If this specific player doesn't work, we need to stop this branch to avoid infinite loop
                     break;

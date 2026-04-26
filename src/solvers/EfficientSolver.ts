@@ -1,6 +1,7 @@
 import { EAItem, SolverSettings } from '../types';
 import { Utils } from '../core/Utils';
 import { Inventory } from '../core/Inventory';
+import { SbcParser } from '../core/SbcParser';
 
 export class EfficientSolver {
   public static async solve(log: (m: string) => void, settings: SolverSettings) {
@@ -9,33 +10,15 @@ export class EfficientSolver {
     const { challenge, squad, controller } = ctx;
 
     log("Analyzing Requirements...");
-    const rawReqs = challenge.eligibilityRequirements || [];
-    let minRaresNeeded = 0;
-    const buckets: any[] = [];
-    let globalLevel: any = null;
+    const summary = SbcParser.parseCurrentSbc();
+    if (!summary) return log("❌ Failed to parse SBC requirements");
+
     const levelsToDiscover = new Set<string>();
+    if (summary.minGold > 0) levelsToDiscover.add('gold');
+    if (summary.minSilver > 0) levelsToDiscover.add('silver');
+    if (summary.minBronze > 0) levelsToDiscover.add('bronze');
+    if (levelsToDiscover.size === 0) levelsToDiscover.add('gold');
 
-    rawReqs.forEach((r: any) => {
-        const rules: any[] = [];
-        const col = r.kvPairs._collection || r.kvPairs;
-        for (let k in col) rules.push({ key: parseInt(k), value: Utils.getCleanValue(col[k]) });
-
-        const isRare = rules.some(rl => (rl.key === 25 && rl.value.includes(4)) || (rl.key === 18 && rl.value.includes(1)));
-        if (isRare) minRaresNeeded = Math.max(minRaresNeeded, r.count || 0);
-
-        const bronze = rules.some(rl => (rl.key === 17 && rl.value.includes(1)) || (rl.key === 3 && rl.value.includes(1)));
-        const silver = rules.some(rl => (rl.key === 17 && rl.value.includes(2)) || (rl.key === 3 && rl.value.includes(2)));
-        const gold = rules.some(rl => (rl.key === 17 && rl.value.includes(3)) || (rl.key === 3 && rl.value.includes(3)));
-
-        const bInfo = bronze ? { level: "bronze", min: 0, max: 64 } : (silver ? { level: "silver", min: 65, max: 74 } : (gold ? { level: "gold", min: 75, max: 82 } : null));
-        if (bInfo) {
-            levelsToDiscover.add(bInfo.level);
-            if (r.count > 0) buckets.push({ ...bInfo, count: r.count });
-            else if (r.count === -1) globalLevel = bInfo;
-        }
-    });
-
-    if (buckets.length === 0 && !globalLevel) globalLevel = { level: "gold", min: 75, max: 82 };
     await Inventory.primeInventory(Array.from(levelsToDiscover));
 
     const pool = Inventory.memory.filter(p => {
@@ -61,12 +44,21 @@ export class EfficientSolver {
       });
     };
 
-    [...buckets, ...(globalLevel ? [{ ...globalLevel, count: 11 }] : [])].forEach(bucket => {
+    const buckets = [
+        ...(summary.minBronze > 0 ? [{ level: 'bronze', min: 0, max: 64, count: summary.minBronze }] : []),
+        ...(summary.minSilver > 0 ? [{ level: 'silver', min: 65, max: 74, count: summary.minSilver }] : []),
+        ...(summary.minGold > 0 ? [{ level: 'gold', min: 75, max: 82, count: summary.minGold }] : [])
+    ];
+
+    // If no buckets, default to gold 11
+    if (buckets.length === 0) buckets.push({ level: 'gold', min: 75, max: 82, count: 11 });
+
+    buckets.forEach(bucket => {
       let count = 0;
-      const targetCount = (bucket.count === 11 || bucket.count === -1 ? activeSlots.length : bucket.count);
+      const targetCount = (bucket.count >= 11 ? activeSlots.length : bucket.count);
       activeSlots.forEach((slot: any, i: number) => {
         if (selected[i] || count >= targetCount) return;
-        let match = (raresInserted < minRaresNeeded) ? findMatch(bucket, 1) : findMatch(bucket, 0, bucket.level !== 'gold');
+        let match = (raresInserted < summary.minRare) ? findMatch(bucket, 1) : findMatch(bucket, 0, bucket.level !== 'gold');
         if (!match) match = findMatch(bucket, 0, true);
         if (match) {
           console.log(`[DECISION] Slot ${slot.index}: ${match.rareflag ? "RARE" : "COMMON"} ${match._staticData?.name} (${match.rating})`);

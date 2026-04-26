@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC SBC Enhanced Builder
 // @namespace    fc-sbc-builder
-// @version      1.0.30
+// @version      1.0.31
 // @author       tomwang
 // @description  Optimal SBC builder with Storage-First priority
 // @license      ISC
@@ -497,7 +497,7 @@
         const criteria = new win.UTSearchCriteriaDTO();
         const finalParams = Object.assign({
           type: "player",
-          count: 200,
+          count: 250,
           excludeLoans: true,
           isUntradeable: "true",
           searchAltPositions: true,
@@ -515,17 +515,24 @@
       const win = typeof unsafeWindow !== "undefined" ? unsafeWindow : window;
       const repo = win.repositories.Item;
       if (!repo) return { total: 0, storage: 0, unassigned: 0 };
+      const deepFetches = [
+        this.fetchItems({ level: "gold", count: 250, offset: 0 }),
+        this.fetchItems({ level: "gold", count: 250, offset: 250 }),
+        this.fetchItems({ level: "gold", count: 250, offset: 500 }),
+        this.fetchItems({ level: "silver", count: 250, offset: 0 })
+      ];
       const storageCriteria = new win.UTSearchCriteriaDTO();
       storageCriteria.type = "player";
-      const storageItems = await new Promise((r2) => {
+      const storageFetch = new Promise((r2) => {
         win.services.Item.searchStorageItems(storageCriteria).observe({ name: "storage" }, (obs, res) => {
           const raw = res.response?.items || res.items || res._collection || res;
           r2(Array.isArray(raw) ? raw : raw?._collection || Object.values(raw || {}));
         });
       });
-      const clubFetches = [this.fetchItems({ count: 250 })];
-      targetLevels.forEach((lvl) => clubFetches.push(this.fetchItems({ level: lvl, count: 250 })));
-      const clubResults = await Promise.all(clubFetches);
+      const [pages, storageItems] = await Promise.all([
+        Promise.all(deepFetches),
+        storageFetch
+      ]);
       const allPlayers = new Map();
       let storageCount = 0;
       let unassignedCount = 0;
@@ -548,9 +555,86 @@
       addEntities(storageItems, "storage");
       const unRaw = repo.unassigned?._collection || repo.unassigned || [];
       addEntities(Array.isArray(unRaw) ? unRaw : Object.values(unRaw), "unassigned");
-      clubResults.forEach((list) => addEntities(list, "club"));
+      pages.forEach((list) => addEntities(list, "club"));
       this._clubPlayersMemory = Array.from(allPlayers.values());
       return { total: this._clubPlayersMemory.length, storage: storageCount, unassigned: unassignedCount };
+    }
+  }
+  class SbcParser {
+    static parseCurrentSbc() {
+      const ctx = Utils.getSbcContext();
+      if (!ctx) return null;
+      const { challenge } = ctx;
+      const summary = {
+        minRating: 0,
+        minChem: 0,
+        minRare: 0,
+        isTotw: false,
+        isTots: false,
+        minGold: 0,
+        minSilver: 0,
+        minBronze: 0,
+        maxSameNation: 11,
+        maxSameLeague: 11,
+        maxSameClub: 11,
+        minSameNation: 1,
+        minSameLeague: 1,
+        minSameClub: 1,
+        minTotalNations: 1,
+        minTotalLeagues: 1,
+        minTotalClubs: 1,
+        maxTotalNations: 11,
+        maxTotalLeagues: 11,
+        maxTotalClubs: 11,
+        specificConstraints: []
+      };
+      const requirements = challenge.eligibilityRequirements || [];
+      requirements.forEach((r2) => {
+        const col = r2.kvPairs?._collection || r2.kvPairs || {};
+        for (let k2 in col) {
+          const key = parseInt(k2);
+          const vals = [].concat(Utils.getCleanValue(col[k2]));
+          if (key === 3 || key === 17) {
+            const qualityLevel = vals[0];
+            const numPlayers = r2.count === -1 ? 11 : r2.count;
+            if (qualityLevel === 3) summary.minGold = Math.max(summary.minGold, numPlayers);
+            if (qualityLevel === 2) summary.minSilver = Math.max(summary.minSilver, numPlayers);
+            if (qualityLevel === 1) summary.minBronze = Math.max(summary.minBronze, numPlayers);
+          } else if (key === 25 || key === 18) {
+            summary.minRare = Math.max(summary.minRare, r2.count === -1 ? 11 : r2.count);
+            if (key === 18 && vals.includes(3)) summary.isTotw = true;
+            if (key === 25 && vals.includes(44)) summary.isTots = true;
+          } else {
+            const actualValue = r2.count === -1 ? vals[0] : r2.count;
+            if (key === 19) summary.minRating = Math.max(summary.minRating, actualValue, r2.count);
+            if (key === 35 || key === 20) summary.minChem = Math.max(summary.minChem, actualValue, r2.count);
+            if (r2.scope === 1) {
+              if (key === 4) summary.maxSameNation = actualValue;
+              if (key === 5) summary.maxSameLeague = actualValue;
+              if (key === 6) summary.maxSameClub = actualValue;
+              if (key === 7) summary.maxTotalNations = actualValue;
+              if (key === 8) summary.maxTotalLeagues = actualValue;
+              if (key === 9) summary.maxTotalClubs = actualValue;
+            } else if (r2.scope === 0) {
+              if (key === 4) summary.minSameNation = Math.max(summary.minSameNation, actualValue);
+              if (key === 5) summary.minSameLeague = Math.max(summary.minSameLeague, actualValue);
+              if (key === 6) summary.minSameClub = Math.max(summary.minSameClub, actualValue);
+              if (key === 7) summary.minTotalNations = Math.max(summary.minTotalNations, actualValue);
+              if (key === 8) summary.minTotalLeagues = Math.max(summary.minTotalLeagues, actualValue);
+              if (key === 9) summary.minTotalClubs = Math.max(summary.minTotalClubs, actualValue);
+              if (key === 10 || key === 11 || key === 12) {
+                summary.specificConstraints.push({
+                  type: key === 10 ? "nation" : key === 11 ? "league" : "club",
+                  ids: vals,
+                  count: actualValue,
+                  label: r2.requirementLabel || ""
+                });
+              }
+            }
+          }
+        }
+      });
+      return summary;
     }
   }
   class LeagueSolver {
@@ -559,23 +643,13 @@
       if (!ctx) return log("❌ SBC Screen Not Found");
       const { challenge, squad, controller } = ctx;
       log("Analyzing Requirements...");
-      const rawReqs = challenge.eligibilityRequirements || [];
-      let targetRating = 0;
-      let targetChem = 0;
-      let isTotwReq = false;
+      const summary = SbcParser.parseCurrentSbc();
+      if (!summary) return log("❌ Failed to parse SBC requirements");
       const detectedLeagues = new Set();
-      rawReqs.forEach((r2) => {
-        const col = r2.kvPairs._collection || r2.kvPairs;
-        for (let k2 in col) {
-          const val = Utils.getCleanValue(col[k2]);
-          const key = parseInt(k2);
-          if (key === 19) targetRating = Math.max(targetRating, Number(Array.isArray(val) ? val[0] : val) || 0);
-          if (key === 35) targetChem = Math.max(targetChem, Number(Array.isArray(val) ? val[0] : val) || 0);
-          if (key === 11) (Array.isArray(val) ? val : [val]).forEach((l2) => detectedLeagues.add(l2));
-          if (key === 18 && val.includes(3)) isTotwReq = true;
-        }
+      summary.specificConstraints.forEach((s2) => {
+        if (s2.type === "league") s2.ids.forEach((id) => detectedLeagues.add(id));
       });
-      log(`Target: ${targetRating} OVR | Chem: ${targetChem}`);
+      log(`Target: ${summary.minRating} OVR | Chem: ${summary.minChem}`);
       const discoveryLeagues = Array.from(detectedLeagues).slice(0, 3);
       await Promise.all(discoveryLeagues.map((l2) => Inventory.fetchItems({ league: l2, count: 250 })));
       await Inventory.primeInventory();
@@ -585,7 +659,7 @@
         if (settings.excludedLeagues.includes(p2.leagueId)) return false;
         if (p2.rating > 82) return false;
         if (globalLeagues.length > 0 && !globalLeagues.includes(p2.leagueId)) return false;
-        const isStandard = p2.rareflag === 0 || p2.rareflag === 1 || isTotwReq && (p2.rarityId === 3 || p2.rareflag === 3);
+        const isStandard = p2.rareflag === 0 || p2.rareflag === 1 || summary.isTotw && (p2.rarityId === 3 || p2.rareflag === 3) || summary.isTots && (p2.rarityId === 44 || p2.rareflag === 44);
         if (!isStandard) return false;
         return true;
       }).sort((a2, b2) => a2._sourcePriority - b2._sourcePriority || a2.rating - b2.rating);
@@ -604,7 +678,7 @@
       const fillPass = (source, matchPos) => {
         activeSlots.forEach((slot, i2) => {
           if (selected[i2]) return;
-          if (matchPos && targetChem > 0 && getChem(selected) >= targetChem) return;
+          if (matchPos && summary.minChem > 0 && getChem(selected) >= summary.minChem) return;
           const slotPos = Utils.normalizePos(slot.position?.id || slot._position);
           const match = pool.find((p2) => {
             if (usedIds.has(p2.id) || usedPersonaIds.has(p2._personaId)) return false;
@@ -640,10 +714,10 @@
           }
         }
       }
-      if (targetRating > 0 && Utils.calculateRating(selected) < targetRating) {
-        log(`Increasing rating to ${targetRating}...`);
+      if (summary.minRating > 0 && Utils.calculateRating(selected) < summary.minRating) {
+        log(`Increasing rating to ${summary.minRating}...`);
         let bridgeAttempts = 0;
-        while (bridgeAttempts < 50 && Utils.calculateRating(selected) < targetRating) {
+        while (bridgeAttempts < 50 && Utils.calculateRating(selected) < summary.minRating) {
           bridgeAttempts++;
           const clubItems = selected.filter((s2) => s2 && s2._sourceType !== "storage");
           if (clubItems.length === 0) break;
@@ -664,13 +738,13 @@
           } else break;
         }
       }
-      if (targetRating > 0 && Utils.calculateRating(selected) > targetRating) {
+      if (summary.minRating > 0 && Utils.calculateRating(selected) > summary.minRating) {
         log("Trimming excess rating...");
         let trimAttempts = 0;
         while (trimAttempts < 50) {
           trimAttempts++;
           const currentR = Utils.calculateRating(selected);
-          if (currentR <= targetRating) break;
+          if (currentR <= summary.minRating) break;
           const clubItems = selected.filter((s2) => s2 && s2._sourceType !== "storage");
           if (clubItems.length === 0) break;
           const maxR = Math.max(...clubItems.map((s2) => s2.rating));
@@ -681,7 +755,7 @@
           if (replacement) {
             const temp = [...selected];
             temp[downIdx] = replacement;
-            if (Utils.calculateRating(temp) >= targetRating) {
+            if (Utils.calculateRating(temp) >= summary.minRating) {
               console.log(`[TRIM] Downgrading ${currentItem.rating} -> ${replacement.rating}`);
               usedIds.delete(currentItem.id);
               usedPersonaIds.delete(currentItem._personaId);
@@ -707,19 +781,10 @@
       if (!ctx) return log("❌ SBC Screen Not Found");
       const { challenge, squad, controller } = ctx;
       log("Analyzing Requirements...");
-      let isTotwRequired = false;
-      let targetRating = 0;
-      (challenge.eligibilityRequirements || []).forEach((r2) => {
-        const col = r2.kvPairs._collection || r2.kvPairs;
-        for (let k2 in col) {
-          const val = Utils.getCleanValue(col[k2]);
-          const key = parseInt(k2);
-          if (key === 18 && (val === 3 || Array.isArray(val) && val.includes(3))) isTotwRequired = true;
-          if (key === 19) targetRating = Math.max(targetRating, Number(Array.isArray(val) ? val[0] : val) || 0);
-        }
-      });
-      log(`Target: ${targetRating} OVR | TOTW Required: ${isTotwRequired}`);
-      await Inventory.primeInventory(isTotwRequired ? ["special"] : ["gold"]);
+      const summary = SbcParser.parseCurrentSbc();
+      if (!summary) return log("❌ Failed to parse SBC requirements");
+      log(`Target: ${summary.minRating} OVR | Special Required: ${summary.isTotw || summary.isTots}`);
+      await Inventory.primeInventory(summary.isTotw || summary.isTots ? ["special"] : ["gold"]);
       const pool = Inventory.memory.filter((p2) => {
         if (settings.untradOnly && p2.tradable === true) return false;
         if (settings.excludedLeagues.includes(p2.leagueId)) return false;
@@ -731,12 +796,12 @@
       const activeSlots = squad.getSBCSlots().filter((s2) => !s2.isBrick() && s2.index <= 10);
       const selected = new Array(activeSlots.length).fill(null);
       let anchorRating = 87;
-      if (targetRating === 83) anchorRating = 83;
-      else if (targetRating === 84) anchorRating = 84;
-      else if (targetRating >= 85) anchorRating = 87;
-      if (targetRating >= 86) anchorRating = 88;
-      let anchor = isTotwRequired ? pool.find((p2) => p2.rarityId === 3 || p2.rareflag === 3) : pool.find((p2) => p2.rating === anchorRating && p2.rareflag === 1);
-      if (!anchor && !isTotwRequired && anchorRating > 83) {
+      if (summary.minRating === 83) anchorRating = 83;
+      else if (summary.minRating === 84) anchorRating = 84;
+      else if (summary.minRating >= 85) anchorRating = 87;
+      if (summary.minRating >= 86) anchorRating = 88;
+      let anchor = summary.isTotw || summary.isTots ? pool.find((p2) => p2.rarityId === 3 || p2.rareflag === 3 || p2.rarityId === 44 || p2.rareflag === 44) : pool.find((p2) => p2.rating === anchorRating && p2.rareflag === 1);
+      if (!anchor && !(summary.isTotw || summary.isTots) && anchorRating > 83) {
         anchor = pool.find((p2) => p2.rating >= anchorRating && p2.rating <= 88 && p2.rareflag === 1);
       }
       if (anchor) {
@@ -744,17 +809,17 @@
         selected[0] = anchor;
         usedIds.add(anchor.id);
         usedPersonaIds.add(anchor._personaId);
-      } else if (isTotwRequired) {
-        return log("❌ No Untradeable TOTW found.");
+      } else if (summary.isTotw || summary.isTots) {
+        return log("❌ No Untradeable TOTW/TOTS found.");
       }
       const clogs = { 83: 0, 84: 0 };
       pool.forEach((p2) => {
         if (p2._sourceType === "storage" && (p2.rating === 83 || p2.rating === 84)) clogs[p2.rating]++;
       });
       let pattern = [];
-      if (targetRating === 83) {
+      if (summary.minRating === 83) {
         pattern = [{ r: 83, c: 10 }];
-      } else if (targetRating === 84) {
+      } else if (summary.minRating === 84) {
         pattern = [{ r: 84, c: 10 }];
       } else {
         pattern = anchor && anchor.rating >= 88 ? [{ r: 83, c: 10 }] : clogs[84] >= 6 ? [{ r: 84, c: 6 }, { r: 83, c: 4 }] : [{ r: 87, c: 1 }, { r: 83, c: 9 }];
@@ -793,13 +858,13 @@
           usedPersonaIds.add(filler._personaId);
         }
       });
-      if (targetRating > 0) {
+      if (summary.minRating > 0) {
         log("Optimizing fodder usage...");
         let optAttempts = 0;
         while (optAttempts < 100) {
           optAttempts++;
           const currentRating = Utils.calculateRating(selected);
-          if (currentRating <= targetRating) break;
+          if (currentRating <= summary.minRating) break;
           const ratings = selected.map((s2, idx) => ({ rating: s2.rating, index: idx, sourceType: s2._sourceType })).filter((x2) => x2.index !== 0);
           if (ratings.length === 0) break;
           const maxR = Math.max(...ratings.map((r2) => r2.rating));
@@ -812,14 +877,14 @@
             const tempSquad = [...selected];
             tempSquad[downIdx] = downgrade;
             const newRating = Utils.calculateRating(tempSquad);
-            if (newRating >= targetRating || currentRating > targetRating && newRating < currentRating) {
+            if (newRating >= summary.minRating || currentRating > summary.minRating && newRating < currentRating) {
               console.log(`[OPTIMIZE] Downgrading Slot ${downIdx}: ${currentItem.rating} -> ${downgrade.rating} to offset high-rated cards.`);
               usedIds.delete(currentItem.id);
               usedPersonaIds.delete(currentItem._personaId);
               selected[downIdx] = downgrade;
               usedIds.add(downgrade.id);
               usedPersonaIds.add(downgrade._personaId);
-              if (newRating === targetRating) break;
+              if (newRating === summary.minRating) break;
             } else {
               break;
             }
@@ -841,28 +906,13 @@
       if (!ctx) return log("❌ SBC Screen Not Found");
       const { challenge, squad, controller } = ctx;
       log("Analyzing Requirements...");
-      const rawReqs = challenge.eligibilityRequirements || [];
-      let minRaresNeeded = 0;
-      const buckets = [];
-      let globalLevel = null;
+      const summary = SbcParser.parseCurrentSbc();
+      if (!summary) return log("❌ Failed to parse SBC requirements");
       const levelsToDiscover = new Set();
-      rawReqs.forEach((r2) => {
-        const rules = [];
-        const col = r2.kvPairs._collection || r2.kvPairs;
-        for (let k2 in col) rules.push({ key: parseInt(k2), value: Utils.getCleanValue(col[k2]) });
-        const isRare = rules.some((rl) => rl.key === 25 && rl.value.includes(4) || rl.key === 18 && rl.value.includes(1));
-        if (isRare) minRaresNeeded = Math.max(minRaresNeeded, r2.count || 0);
-        const bronze = rules.some((rl) => rl.key === 17 && rl.value.includes(1) || rl.key === 3 && rl.value.includes(1));
-        const silver = rules.some((rl) => rl.key === 17 && rl.value.includes(2) || rl.key === 3 && rl.value.includes(2));
-        const gold = rules.some((rl) => rl.key === 17 && rl.value.includes(3) || rl.key === 3 && rl.value.includes(3));
-        const bInfo = bronze ? { level: "bronze", min: 0, max: 64 } : silver ? { level: "silver", min: 65, max: 74 } : gold ? { level: "gold", min: 75, max: 82 } : null;
-        if (bInfo) {
-          levelsToDiscover.add(bInfo.level);
-          if (r2.count > 0) buckets.push({ ...bInfo, count: r2.count });
-          else if (r2.count === -1) globalLevel = bInfo;
-        }
-      });
-      if (buckets.length === 0 && !globalLevel) globalLevel = { level: "gold", min: 75, max: 82 };
+      if (summary.minGold > 0) levelsToDiscover.add("gold");
+      if (summary.minSilver > 0) levelsToDiscover.add("silver");
+      if (summary.minBronze > 0) levelsToDiscover.add("bronze");
+      if (levelsToDiscover.size === 0) levelsToDiscover.add("gold");
       await Inventory.primeInventory(Array.from(levelsToDiscover));
       const pool = Inventory.memory.filter((p2) => {
         if (settings.untradOnly && p2.tradable === true) return false;
@@ -884,12 +934,18 @@
           return true;
         });
       };
-      [...buckets, ...globalLevel ? [{ ...globalLevel, count: 11 }] : []].forEach((bucket) => {
+      const buckets = [
+        ...summary.minBronze > 0 ? [{ level: "bronze", min: 0, max: 64, count: summary.minBronze }] : [],
+        ...summary.minSilver > 0 ? [{ level: "silver", min: 65, max: 74, count: summary.minSilver }] : [],
+        ...summary.minGold > 0 ? [{ level: "gold", min: 75, max: 82, count: summary.minGold }] : []
+      ];
+      if (buckets.length === 0) buckets.push({ level: "gold", min: 75, max: 82, count: 11 });
+      buckets.forEach((bucket) => {
         let count = 0;
-        const targetCount = bucket.count === 11 || bucket.count === -1 ? activeSlots.length : bucket.count;
+        const targetCount = bucket.count >= 11 ? activeSlots.length : bucket.count;
         activeSlots.forEach((slot, i2) => {
           if (selected[i2] || count >= targetCount) return;
-          let match = raresInserted < minRaresNeeded ? findMatch(bucket, 1) : findMatch(bucket, 0, bucket.level !== "gold");
+          let match = raresInserted < summary.minRare ? findMatch(bucket, 1) : findMatch(bucket, 0, bucket.level !== "gold");
           if (!match) match = findMatch(bucket, 0, true);
           if (match) {
             console.log(`[DECISION] Slot ${slot.index}: ${match.rareflag ? "RARE" : "COMMON"} ${match._staticData?.name} (${match.rating})`);
@@ -915,180 +971,156 @@
       const ctx = Utils.getSbcContext();
       if (!ctx) return log("❌ SBC Screen Not Found");
       const { challenge, squad, controller } = ctx;
-      log("Analyzing Complex Constraints...");
-      const rules = {
-        targetRating: 0,
-        targetChem: 0,
-        minGold: 0,
-        minRare: 0,
-        maxSameClub: 11,
-        maxSameNation: 11,
-        maxSameLeague: 11,
-        maxTotalNations: 11,
-        maxTotalLeagues: 11,
-        seeds: []
-      };
-      (challenge.eligibilityRequirements || []).forEach((r2) => {
-        const col = r2.kvPairs._collection || r2.kvPairs;
-        for (let k2 in col) {
-          const key = parseInt(k2);
-          const val = Utils.getCleanValue(col[k2]);
-          const vals = (Array.isArray(val) ? val : [val]).filter((v2) => v2 !== void 0);
-          if (key === 19) rules.targetRating = Math.max(rules.targetRating, vals[0] || 0);
-          if (key === 35 || key === 20) rules.targetChem = Math.max(rules.targetChem, vals[0] || 0);
-          if (key === 17 && vals.includes(3)) rules.minGold = r2.count;
-          if (key === 25 && vals.includes(4)) rules.minRare = r2.count;
-          if (r2.count === -1) {
-            if (r2.scope === 1) {
-              if (key === 5 || key === 7 || key === 9) rules.maxTotalNations = Math.min(rules.maxTotalNations, vals[0]);
-              if (key === 6 || key === 10 || key === 12) rules.maxTotalLeagues = Math.min(rules.maxTotalLeagues, vals[0]);
-            } else {
-              if (key === 5 || key === 9) rules.maxSameNation = Math.min(rules.maxSameNation, vals[0]);
-              if (key === 6 || key === 10) rules.maxSameLeague = Math.min(rules.maxSameLeague, vals[0]);
-              if (key === 7 || key === 12) rules.maxSameClub = Math.min(rules.maxSameClub, vals[0]);
-            }
-          } else {
-            const validIds = vals.filter((id) => id > 0);
-            if (validIds.length > 0) {
-              const type = key === 14 || key === 12 || key === 7 ? "club" : key === 15 || key === 5 || key === 9 ? "nation" : "league";
-              rules.seeds.push({ type, ids: validIds, count: r2.count });
-            }
-          }
-        }
-      });
-      log(`Targets: ${rules.targetChem} Chem | Nations: ${rules.maxTotalNations} Max Total`);
-      log("Performing Multi-Pass Sync...");
-      await Promise.all([
-        Inventory.fetchItems({ count: 250 }),
-        Inventory.fetchItems({ league: 13, count: 50 }),
-        Inventory.fetchItems({ league: 53, count: 50 }),
-        Inventory.fetchItems({ league: 19, count: 50 }),
-        Inventory.fetchItems({ league: 31, count: 50 }),
-        Inventory.fetchItems({ league: 16, count: 50 })
-      ]);
+      log("Analyzing Structural Requirements...");
+      const summary = SbcParser.parseCurrentSbc();
+      if (!summary) return log("❌ Failed to parse SBC requirements");
+      log(`Targets: ${summary.minChem} Chem | ${summary.minRating} Rating`);
+      log("Performing 1000-Player Deep Scan...");
       await Inventory.primeInventory();
+      const ratingFloor = Math.max(0, summary.minRating - 3);
       const pool = Inventory.memory.filter(
-        (p2) => p2.tradable === false && !p2.evolutionInfo && p2.rareflag <= 1 && p2.rating < 89
-      );
-      const activeSlots = squad.getSBCSlots().filter((s2) => !s2.isBrick() && s2.index <= 10);
-      const overlaps = {};
-      pool.forEach((p2) => {
-        const key = `${p2.leagueId}-${p2.nationId}`;
-        if (!overlaps[key]) overlaps[key] = { lid: p2.leagueId, nid: p2.nationId, count: 0 };
-        overlaps[key].count++;
-      });
-      const trialOverlaps = Object.values(overlaps).sort((a2, b2) => b2.count - a2.count).slice(0, 15);
-      const calculateRating = (items) => {
-        const active = items.filter((p2) => p2 !== null);
-        if (active.length < 11) return 0;
-        const ratings = active.map((p2) => p2.rating);
-        const sum = ratings.reduce((a2, b2) => a2 + b2, 0);
-        const avg = sum / 11;
-        let cf = 0;
-        ratings.forEach((r2) => {
-          if (r2 > avg) cf += r2 - avg;
-        });
-        return Math.floor((sum + cf) / 11 + 0.0401);
-      };
-      const runTrial = (ov) => {
-        const selected = new Array(11).fill(null);
+        (p2) => p2.tradable === false && !p2.evolutionInfo && p2.rating >= ratingFloor && p2.rating <= 83
+      ).sort((a2, b2) => a2.rating - b2.rating);
+      log(`[INFO] Deep Pool: ${pool.length} candidates.`);
+      const activeSlots = squad.getSBCSlots().filter((s2) => !s2.isBrick() && s2.index <= 10).map((s2) => ({
+        index: s2.index,
+        pos: Utils.normalizePos(s2.positionId || s2.position?.id)
+      }));
+      const solveTemplate = (lA, lB) => {
+        const selected = new Array(activeSlots.length).fill(null);
         const usedIds = new Set();
-        const usedPersonaIds = new Set();
-        const counts = { nation: new Map(), league: new Map(), club: {} };
-        const fulfilled = new Array(rules.seeds.length).fill(0);
+        const counts = { nation: new Map(), league: new Map(), club: new Map() };
         let iterations = 0;
-        const updateState = (p2, add) => {
-          const mod = add ? 1 : -1;
-          counts.club[p2.teamId] = (counts.club[p2.teamId] || 0) + mod;
-          rules.seeds.forEach((s2, i2) => {
-            const match = s2.type === "club" && s2.ids.includes(p2.teamId) || s2.type === "nation" && s2.ids.includes(p2.nationId) || s2.type === "league" && s2.ids.includes(p2.leagueId);
-            if (match) fulfilled[i2] += mod;
-          });
-          if (add) {
-            counts.nation.set(p2.nationId, (counts.nation.get(p2.nationId) || 0) + 1);
-            counts.league.set(p2.leagueId, (counts.league.get(p2.leagueId) || 0) + 1);
-          } else {
-            const nC = counts.nation.get(p2.nationId) - 1;
-            if (nC <= 0) counts.nation.delete(p2.nationId);
-            else counts.nation.set(p2.nationId, nC);
-            const lC = counts.league.get(p2.leagueId) - 1;
-            if (lC <= 0) counts.league.delete(p2.leagueId);
-            else counts.league.set(p2.leagueId, lC);
-          }
+        const updateMap = (map, key, mod) => {
+          const v2 = (map.get(key) || 0) + mod;
+          if (v2 <= 0) map.delete(key);
+          else map.set(key, v2);
         };
-        const isValid = (p2, slotIdx) => {
-          if (usedIds.has(p2.id) || usedPersonaIds.has(p2._personaId)) return false;
-          if ((counts.club[p2.teamId] || 0) >= rules.maxSameClub) return false;
-          if ((counts.nation.get(p2.nationId) || 0) >= rules.maxSameNation) return false;
-          if ((counts.league.get(p2.leagueId) || 0) >= rules.maxSameLeague) return false;
-          if (!counts.nation.has(p2.nationId) && counts.nation.size >= rules.maxTotalNations) return false;
-          if (!counts.league.has(p2.leagueId) && counts.league.size >= rules.maxTotalLeagues) return false;
-          const left = 11 - slotIdx - 1;
-          for (let i2 = 0; i2 < rules.seeds.length; i2++) {
-            if (rules.seeds[i2].count - fulfilled[i2] > left + 1) return false;
-          }
-          return true;
-        };
-        const solve = (idx) => {
+        const recurse = (idx) => {
           iterations++;
-          if (iterations > 5e3) return false;
-          if (idx === 11) {
-            const tempArr = new Array(23).fill(null);
-            activeSlots.forEach((slot, i2) => tempArr[slot.index] = selected[i2]);
-            squad.setPlayers(tempArr);
-            return calculateRating(selected) >= rules.targetRating && squad.getChemistry() >= rules.targetChem;
-          }
-          const slotPos = Utils.normalizePos(activeSlots[idx].position?.id || activeSlots[idx]._position);
-          const candidates = pool.filter((p2) => isValid(p2, idx)).map((p2) => {
-            let score = 0;
-            rules.seeds.forEach((s2, si) => {
-              if (fulfilled[si] < s2.count && (s2.type === "club" && s2.ids.includes(p2.teamId) || s2.type === "nation" && s2.ids.includes(p2.nationId) || s2.type === "league" && s2.ids.includes(p2.leagueId))) score += 1e4;
+          if (iterations > 3e4) return false;
+          if (idx === activeSlots.length) {
+            const finalArr = new Array(23).fill(null);
+            activeSlots.forEach((s2, i2) => finalArr[s2.index] = selected[i2]);
+            squad.setPlayers(finalArr);
+            const finalC = squad.getChemistry();
+            const rt = selected.map((p2) => p2.rating), sum = rt.reduce((a2, b2) => a2 + b2, 0), avg = sum / 11;
+            let cf = 0;
+            rt.forEach((v2) => {
+              if (v2 > avg) cf += v2 - avg;
             });
-            if (p2.leagueId === ov.lid && p2.nationId === ov.nid) score += 5e3;
-            else if (p2.nationId === ov.nid) score += 1e3;
-            if (Utils.normalizePos(p2.preferredPosition) === slotPos) score += 500;
+            const finalR = Math.floor((sum + cf) / 11 + 0.0401);
+            return finalC >= summary.minChem && finalR >= summary.minRating && counts.nation.size >= summary.minTotalNations;
+          }
+          const slot = activeSlots[idx];
+          const candidates = pool.filter((p2) => {
+            if (usedIds.has(p2.id) || Utils.normalizePos(p2.preferredPosition) !== slot.pos) return false;
+            if (p2.leagueId !== lA && p2.leagueId !== lB) return false;
+            if (counts.nation.size >= 3 && !counts.nation.has(p2.nationId)) return false;
+            if ((counts.club.get(p2.teamId) || 0) >= summary.maxSameClub) return false;
+            return true;
+          }).map((p2) => {
+            let score = 0;
+            if (counts.club.get(p2.teamId) === 1) score += 3e4;
+            if (counts.nation.get(p2.nationId) === 1) score += 2e4;
             return { p: p2, score };
-          }).sort((a2, b2) => b2.score - a2.score || a2.p.rating - b2.p.rating).slice(0, 15).map((c2) => c2.p);
+          }).sort((a2, b2) => b2.score - a2.score || a2.p.rating - b2.p.rating).slice(0, 12).map((c2) => c2.p);
           for (const p2 of candidates) {
             selected[idx] = p2;
             usedIds.add(p2.id);
-            usedPersonaIds.add(p2._personaId);
-            updateState(p2, true);
-            if (solve(idx + 1)) return true;
-            updateState(p2, false);
+            updateMap(counts.club, p2.teamId, 1);
+            updateMap(counts.nation, p2.nationId, 1);
+            updateMap(counts.league, p2.leagueId, 1);
+            if (recurse(idx + 1)) return true;
+            updateMap(counts.club, p2.teamId, -1);
+            updateMap(counts.nation, p2.nationId, -1);
+            updateMap(counts.league, p2.leagueId, -1);
             selected[idx] = null;
             usedIds.delete(p2.id);
-            usedPersonaIds.delete(p2._personaId);
           }
           return false;
         };
-        return solve(0) ? { squad: [...selected] } : null;
+        if (recurse(0)) return selected;
+        return null;
       };
-      let best = null;
-      for (const ov of trialOverlaps) {
-        const res = runTrial(ov);
-        if (res) {
+      const optimizeFodder = (items) => {
+        let current = [...items];
+        let changed = true;
+        log("🔍 Starting Multi-Axis Optimization (V30)...");
+        const tryApply = (next) => {
+          if (Utils.calculateRating(next) < summary.minRating) return false;
           const tempArr = new Array(23).fill(null);
-          activeSlots.forEach((slot, i2) => tempArr[slot.index] = res.squad[i2]);
+          activeSlots.forEach((s2, idx) => tempArr[s2.index] = next[idx]);
           squad.setPlayers(tempArr);
-          const chem = squad.getChemistry();
-          if (!best || chem > best.chem) {
-            best = { squad: res.squad, chem };
-            if (chem >= 33) break;
+          return squad.getChemistry() >= summary.minChem;
+        };
+        while (changed) {
+          changed = false;
+          const sortedByRating = current.map((p2, i2) => ({ p: p2, i: i2 })).sort((a2, b2) => b2.p.rating - a2.p.rating);
+          for (const { p: p2, i: i2 } of sortedByRating) {
+            const possible = pool.filter((cand) => !current.some((ci) => ci.id === cand.id) && cand.rating < p2.rating && Utils.normalizePos(cand.preferredPosition) === Utils.normalizePos(p2.preferredPosition)).sort((a2, b2) => a2.rating - b2.rating);
+            for (const swap of possible) {
+              const next = [...current];
+              next[i2] = swap;
+              if (tryApply(next)) {
+                current = next;
+                changed = true;
+                log(`[SOLO] Downgraded ${p2.rating} -> ${swap.rating}`);
+                break;
+              }
+            }
+            if (changed) break;
+          }
+          if (changed) continue;
+          for (let i2 = 0; i2 < current.length && !changed; i2++) {
+            for (let j2 = 0; j2 < current.length && !changed; j2++) {
+              if (i2 === j2) continue;
+              const pI = current[i2], pJ = current[j2];
+              if (pI.rating < 75 && pJ.rating < 75) continue;
+              const candidatesI = pool.filter((c2) => !current.some((ci) => ci.id === c2.id) && Utils.normalizePos(c2.preferredPosition) === Utils.normalizePos(pI.preferredPosition)).slice(0, 10);
+              const candidatesJ = pool.filter((c2) => !current.some((ci) => ci.id === c2.id) && Utils.normalizePos(c2.preferredPosition) === Utils.normalizePos(pJ.preferredPosition)).slice(0, 10);
+              for (const cI of candidatesI) {
+                for (const cJ of candidatesJ) {
+                  if (cI.id === cJ.id || cI.rating + cJ.rating >= pI.rating + pJ.rating) continue;
+                  const next = [...current];
+                  next[i2] = cI;
+                  next[j2] = cJ;
+                  if (tryApply(next)) {
+                    current = next;
+                    changed = true;
+                    log(`[BRIDGE] Optimized Pair: (${pI.rating},${pJ.rating}) -> (${cI.rating},${cJ.rating})`);
+                    break;
+                  }
+                }
+                if (changed) break;
+              }
+            }
+          }
+        }
+        return current;
+      };
+      const leagues = {};
+      pool.forEach((p2) => {
+        if (!leagues[p2.leagueId]) leagues[p2.leagueId] = 0;
+        leagues[p2.leagueId]++;
+      });
+      const trialLeagues = Object.keys(leagues).filter((id) => leagues[Number(id)] >= 5).sort((a2, b2) => leagues[Number(b2)] - leagues[Number(a2)]).map(Number).slice(0, 8);
+      log(`Testing permutations of ${trialLeagues.length} major leagues...`);
+      for (let i2 = 0; i2 < trialLeagues.length; i2++) {
+        for (let j2 = i2 + 1; j2 < trialLeagues.length; j2++) {
+          log(`... trial: L${trialLeagues[i2]} + L${trialLeagues[j2]}`);
+          const res = solveTemplate(trialLeagues[i2], trialLeagues[j2]);
+          if (res) {
+            const optimized = optimizeFodder(res);
+            const finalArr = new Array(23).fill(null);
+            activeSlots.forEach((s2, idx) => finalArr[s2.index] = optimized[idx]);
+            squad.setPlayers(finalArr);
+            await Utils.saveSquad(challenge, squad, controller);
+            return log("✅ Optimized Architect Solution Applied!");
           }
         }
       }
-      if (best) {
-        const final = new Array(23).fill(null);
-        best.squad.forEach((p2, i2) => {
-          if (p2) final[activeSlots[i2].index] = p2;
-        });
-        squad.setPlayers(final);
-        await Utils.saveSquad(challenge, squad, controller);
-        log(`✅ Challenge Solved: ${best.chem} Chem`);
-      } else {
-        log("❌ Failed to find structural solution.");
-      }
+      log("❌ All structures failed.");
     }
   }
   class SbcBuilder {
@@ -1245,7 +1277,7 @@ u$1(
               className: "animate-in slide-in-from-left-4 fade-in duration-300",
               children: [
 u$1("div", { className: "flex justify-between items-center mb-6", children: [
-u$1("h2", { className: "text-xs font-black text-white tracking-widest uppercase opacity-60", children: "SBC Master V1.0.30" }),
+u$1("h2", { className: "text-xs font-black text-white tracking-widest uppercase opacity-60", children: "SBC Master V1.0.31" }),
 u$1("div", { className: "flex gap-2", children: [
 u$1(
                       "button",

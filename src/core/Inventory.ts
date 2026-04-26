@@ -14,7 +14,7 @@ export class Inventory {
     return new Promise(r => {
       const criteria = new win.UTSearchCriteriaDTO();
       const finalParams = Object.assign({
-        type: 'player', count: 200, excludeLoans: true, isUntradeable: "true", searchAltPositions: true, sortBy: "ovr", sort: "asc"
+        type: 'player', count: 250, excludeLoans: true, isUntradeable: "true", searchAltPositions: true, sortBy: "ovr", sort: "asc"
       }, criteriaParams);
       Object.assign(criteria, finalParams);
       win.services.Club.search(criteria).observe({ name: 'fetch' }, (obs: any, res: any) => {
@@ -29,18 +29,28 @@ export class Inventory {
     const repo = win.repositories.Item;
     if (!repo) return { total: 0, storage: 0, unassigned: 0 };
 
+    // Massive 4-Page Deep Scan (Matches V27)
+    const deepFetches = [
+        this.fetchItems({ level: 'gold', count: 250, offset: 0 }),
+        this.fetchItems({ level: 'gold', count: 250, offset: 250 }),
+        this.fetchItems({ level: 'gold', count: 250, offset: 500 }),
+        this.fetchItems({ level: 'silver', count: 250, offset: 0 })
+    ];
+
     const storageCriteria = new win.UTSearchCriteriaDTO();
     storageCriteria.type = 'player';
-    const storageItems = await new Promise<any[]>(r => {
+    const storageFetch = new Promise<any[]>(r => {
         win.services.Item.searchStorageItems(storageCriteria).observe({ name: 'storage' }, (obs: any, res: any) => {
             const raw = res.response?.items || res.items || res._collection || res;
             r(Array.isArray(raw) ? raw : (raw?._collection || Object.values(raw || {})));
         });
     });
 
-    const clubFetches = [this.fetchItems({ count: 250 })];
-    targetLevels.forEach(lvl => clubFetches.push(this.fetchItems({ level: lvl, count: 250 })));
-    const clubResults = await Promise.all(clubFetches);
+    const [pages, storageItems] = await Promise.all([
+        Promise.all(deepFetches),
+        storageFetch
+    ]);
+
 
     const allPlayers = new Map<number, EAItem>();
     let storageCount = 0; let unassignedCount = 0;
@@ -66,7 +76,7 @@ export class Inventory {
     addEntities(storageItems, 'storage');
     const unRaw = repo.unassigned?._collection || repo.unassigned || [];
     addEntities(Array.isArray(unRaw) ? unRaw : Object.values(unRaw), 'unassigned');
-    clubResults.forEach(list => addEntities(list, 'club'));
+    pages.forEach(list => addEntities(list, 'club'));
 
     this._clubPlayersMemory = Array.from(allPlayers.values());
     return { total: this._clubPlayersMemory.length, storage: storageCount, unassigned: unassignedCount };

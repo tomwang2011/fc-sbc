@@ -1,6 +1,7 @@
 import { EAItem, SolverSettings } from '../types';
 import { Utils } from '../core/Utils';
 import { Inventory } from '../core/Inventory';
+import { SbcParser } from '../core/SbcParser';
 
 export class LeagueSolver {
   public static async solve(log: (m: string) => void, settings: SolverSettings) {
@@ -9,23 +10,13 @@ export class LeagueSolver {
     const { challenge, squad, controller } = ctx;
 
     log("Analyzing Requirements...");
-    const rawReqs = challenge.eligibilityRequirements || [];
-    let targetRating = 0; let targetChem = 0; let isTotwReq = false;
+    const summary = SbcParser.parseCurrentSbc();
+    if (!summary) return log("❌ Failed to parse SBC requirements");
+
     const detectedLeagues = new Set<number>();
+    summary.specificConstraints.forEach(s => { if (s.type === 'league') s.ids.forEach(id => detectedLeagues.add(id)); });
 
-    rawReqs.forEach((r: any) => {
-        const col = r.kvPairs._collection || r.kvPairs;
-        for (let k in col) {
-            const val = Utils.getCleanValue(col[k]);
-            const key = parseInt(k);
-            if (key === 19) targetRating = Math.max(targetRating, Number(Array.isArray(val) ? val[0] : val) || 0);
-            if (key === 35) targetChem = Math.max(targetChem, Number(Array.isArray(val) ? val[0] : val) || 0);
-            if (key === 11) (Array.isArray(val) ? val : [val]).forEach(l => detectedLeagues.add(l));
-            if (key === 18 && val.includes(3)) isTotwReq = true;
-        }
-    });
-
-    log(`Target: ${targetRating} OVR | Chem: ${targetChem}`);
+    log(`Target: ${summary.minRating} OVR | Chem: ${summary.minChem}`);
     
     // Deeper Discovery for more options
     const discoveryLeagues = Array.from(detectedLeagues).slice(0, 3);
@@ -39,7 +30,9 @@ export class LeagueSolver {
         // Strictly cap at 82 for League SBCs to protect high-rated fodder
         if (p.rating > 82) return false;
         if (globalLeagues.length > 0 && !globalLeagues.includes(p.leagueId!)) return false;
-        const isStandard = p.rareflag === 0 || p.rareflag === 1 || (isTotwReq && (p.rarityId === 3 || p.rareflag === 3));
+        const isStandard = p.rareflag === 0 || p.rareflag === 1 || 
+            (summary.isTotw && (p.rarityId === 3 || p.rareflag === 3)) ||
+            (summary.isTots && (p.rarityId === 44 || p.rareflag === 44));
         if (!isStandard) return false;
         return true;
     }).sort((a,b) => (a._sourcePriority! - b._sourcePriority!) || (a.rating - b.rating));
@@ -59,7 +52,7 @@ export class LeagueSolver {
     const fillPass = (source: string | null, matchPos: boolean) => {
         activeSlots.forEach((slot: any, i: number) => {
             if (selected[i]) return;
-            if (matchPos && targetChem > 0 && getChem(selected) >= targetChem) return; 
+            if (matchPos && summary.minChem > 0 && getChem(selected) >= summary.minChem) return; 
             const slotPos = Utils.normalizePos(slot.position?.id || slot._position);
             const match = pool.find(p => {
                 if (usedIds.has(p.id) || usedPersonaIds.has(p._personaId!)) return false;
@@ -104,10 +97,10 @@ export class LeagueSolver {
     }
 
     // --- DEEP CHECK 2: UPWARD RATING BRIDGE ---
-    if (targetRating > 0 && Utils.calculateRating(selected) < targetRating) {
-        log(`Increasing rating to ${targetRating}...`);
+    if (summary.minRating > 0 && Utils.calculateRating(selected) < summary.minRating) {
+        log(`Increasing rating to ${summary.minRating}...`);
         let bridgeAttempts = 0;
-        while (bridgeAttempts < 50 && Utils.calculateRating(selected) < targetRating) {
+        while (bridgeAttempts < 50 && Utils.calculateRating(selected) < summary.minRating) {
             bridgeAttempts++;
             const clubItems = selected.filter(s => s && s._sourceType !== 'storage') as EAItem[];
             if (clubItems.length === 0) break;
@@ -130,13 +123,13 @@ export class LeagueSolver {
     }
 
     // --- DEEP CHECK 3: DOWNWARD RATING TRIMMING ---
-    if (targetRating > 0 && Utils.calculateRating(selected) > targetRating) {
+    if (summary.minRating > 0 && Utils.calculateRating(selected) > summary.minRating) {
         log("Trimming excess rating...");
         let trimAttempts = 0;
         while (trimAttempts < 50) {
             trimAttempts++;
             const currentR = Utils.calculateRating(selected);
-            if (currentR <= targetRating) break;
+            if (currentR <= summary.minRating) break;
 
             const clubItems = selected.filter(s => s && s._sourceType !== 'storage') as EAItem[];
             if (clubItems.length === 0) break;
@@ -151,7 +144,7 @@ export class LeagueSolver {
             if (replacement) {
                 const temp = [...selected];
                 temp[downIdx] = replacement;
-                if (Utils.calculateRating(temp) >= targetRating) {
+                if (Utils.calculateRating(temp) >= summary.minRating) {
                     console.log(`[TRIM] Downgrading ${currentItem.rating} -> ${replacement.rating}`);
                     usedIds.delete(currentItem.id); usedPersonaIds.delete(currentItem._personaId!);
                     selected[downIdx] = replacement; usedIds.add(replacement.id); usedPersonaIds.add(replacement._personaId!);

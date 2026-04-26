@@ -35,3 +35,34 @@ export interface SolverSettings {
     untradOnly: boolean;
     excludedLeagues: number[];
 }
+
+export interface SbcConstraint {
+    type: 'club' | 'nation' | 'league';
+    ids: number[];
+    count: number;
+    label?: string;
+}
+
+export interface SbcSummary {
+    minRating: number;
+    minChem: number;
+    minRare: number;
+    isTotw: boolean;
+    isTots: boolean;
+    minGold: number;
+    minSilver: number;
+    minBronze: number;
+    maxSameNation: number;
+    maxSameLeague: number;
+    maxSameClub: number;
+    minSameNation: number;
+    minSameLeague: number;
+    minSameClub: number;
+    minTotalNations: number;
+    minTotalLeagues: number;
+    minTotalClubs: number;
+    maxTotalNations: number;
+    maxTotalLeagues: number;
+    maxTotalClubs: number;
+    specificConstraints: SbcConstraint[];
+}
