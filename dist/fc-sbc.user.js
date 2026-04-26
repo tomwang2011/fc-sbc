@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC SBC Enhanced Builder
 // @namespace    fc-sbc-builder
-// @version      1.0.31
+// @version      1.0.32
 // @author       tomwang
 // @description  Optimal SBC builder with Storage-First priority
 // @license      ISC
@@ -986,7 +986,7 @@
         index: s2.index,
         pos: Utils.normalizePos(s2.positionId || s2.position?.id)
       }));
-      const solveTemplate = (lA, lB) => {
+      const solveUniversal = (anchorLeagues) => {
         const selected = new Array(activeSlots.length).fill(null);
         const usedIds = new Set();
         const counts = { nation: new Map(), league: new Map(), club: new Map() };
@@ -996,9 +996,14 @@
           if (v2 <= 0) map.delete(key);
           else map.set(key, v2);
         };
+        const isSeed = (p2) => {
+          return summary.specificConstraints.some(
+            (s2) => s2.type === "club" && s2.ids.includes(p2.teamId) || s2.type === "nation" && s2.ids.includes(p2.nationId) || s2.type === "league" && s2.ids.includes(p2.leagueId)
+          );
+        };
         const recurse = (idx) => {
           iterations++;
-          if (iterations > 3e4) return false;
+          if (iterations > 2e4) return false;
           if (idx === activeSlots.length) {
             const finalArr = new Array(23).fill(null);
             activeSlots.forEach((s2, i2) => finalArr[s2.index] = selected[i2]);
@@ -1010,21 +1015,32 @@
               if (v2 > avg) cf += v2 - avg;
             });
             const finalR = Math.floor((sum + cf) / 11 + 0.0401);
-            return finalC >= summary.minChem && finalR >= summary.minRating && counts.nation.size >= summary.minTotalNations;
+            if (finalR < summary.minRating || finalC < summary.minChem) return false;
+            if (counts.nation.size < summary.minTotalNations || counts.league.size < summary.minTotalLeagues) return false;
+            for (const constraint of summary.specificConstraints) {
+              const count = selected.filter(
+                (p2) => constraint.type === "club" && constraint.ids.includes(p2.teamId) || constraint.type === "nation" && constraint.ids.includes(p2.nationId) || constraint.type === "league" && constraint.ids.includes(p2.leagueId)
+              ).length;
+              if (count < constraint.count) return false;
+            }
+            return true;
           }
           const slot = activeSlots[idx];
           const candidates = pool.filter((p2) => {
             if (usedIds.has(p2.id) || Utils.normalizePos(p2.preferredPosition) !== slot.pos) return false;
-            if (p2.leagueId !== lA && p2.leagueId !== lB) return false;
+            const matchesLeagues = anchorLeagues.length === 0 || anchorLeagues.includes(p2.leagueId);
+            if (!matchesLeagues && !isSeed(p2)) return false;
             if (counts.nation.size >= 3 && !counts.nation.has(p2.nationId)) return false;
             if ((counts.club.get(p2.teamId) || 0) >= summary.maxSameClub) return false;
             return true;
           }).map((p2) => {
             let score = 0;
+            if (isSeed(p2)) score += 5e4;
+            if (anchorLeagues.includes(p2.leagueId)) score += 1e4;
             if (counts.club.get(p2.teamId) === 1) score += 3e4;
             if (counts.nation.get(p2.nationId) === 1) score += 2e4;
             return { p: p2, score };
-          }).sort((a2, b2) => b2.score - a2.score || a2.p.rating - b2.p.rating).slice(0, 12).map((c2) => c2.p);
+          }).sort((a2, b2) => b2.score - a2.score || a2.p.rating - b2.p.rating).slice(0, 15).map((c2) => c2.p);
           for (const p2 of candidates) {
             selected[idx] = p2;
             usedIds.add(p2.id);
@@ -1104,19 +1120,34 @@
         if (!leagues[p2.leagueId]) leagues[p2.leagueId] = 0;
         leagues[p2.leagueId]++;
       });
-      const trialLeagues = Object.keys(leagues).filter((id) => leagues[Number(id)] >= 5).sort((a2, b2) => leagues[Number(b2)] - leagues[Number(a2)]).map(Number).slice(0, 8);
-      log(`Testing permutations of ${trialLeagues.length} major leagues...`);
-      for (let i2 = 0; i2 < trialLeagues.length; i2++) {
-        for (let j2 = i2 + 1; j2 < trialLeagues.length; j2++) {
-          log(`... trial: L${trialLeagues[i2]} + L${trialLeagues[j2]}`);
-          const res = solveTemplate(trialLeagues[i2], trialLeagues[j2]);
-          if (res) {
-            const optimized = optimizeFodder(res);
-            const finalArr = new Array(23).fill(null);
-            activeSlots.forEach((s2, idx) => finalArr[s2.index] = optimized[idx]);
-            squad.setPlayers(finalArr);
-            await Utils.saveSquad(challenge, squad, controller);
-            return log("✅ Optimized Architect Solution Applied!");
+      const sortedLeagues = Object.keys(leagues).sort((a2, b2) => leagues[Number(b2)] - leagues[Number(a2)]).map(Number).slice(0, 10);
+      const leagueCountToTry = Math.max(2, summary.minTotalLeagues);
+      log(`Strategizing for ${leagueCountToTry} leagues with ${summary.specificConstraints.length} specific constraints...`);
+      if (summary.minChem < 15) {
+        log("Low Chem Detected: Using Wide-Pool mode.");
+        const res = solveUniversal([]);
+        if (res) {
+          const optimized = optimizeFodder(res);
+          const finalArr = new Array(23).fill(null);
+          activeSlots.forEach((s2, idx) => finalArr[s2.index] = optimized[idx]);
+          squad.setPlayers(finalArr);
+          await Utils.saveSquad(challenge, squad, controller);
+          return log("✅ Wide-Pool Solution Applied!");
+        }
+      } else {
+        for (let i2 = 0; i2 < sortedLeagues.length; i2++) {
+          for (let j2 = i2 + 1; j2 < sortedLeagues.length; j2++) {
+            const anchors = [sortedLeagues[i2], sortedLeagues[j2]];
+            log(`... trial: L${anchors[0]} + L${anchors[1]}`);
+            const res = solveUniversal(anchors);
+            if (res) {
+              const optimized = optimizeFodder(res);
+              const finalArr = new Array(23).fill(null);
+              activeSlots.forEach((s2, idx) => finalArr[s2.index] = optimized[idx]);
+              squad.setPlayers(finalArr);
+              await Utils.saveSquad(challenge, squad, controller);
+              return log("✅ Adaptive Template Solution Applied!");
+            }
           }
         }
       }
@@ -1277,7 +1308,7 @@ u$1(
               className: "animate-in slide-in-from-left-4 fade-in duration-300",
               children: [
 u$1("div", { className: "flex justify-between items-center mb-6", children: [
-u$1("h2", { className: "text-xs font-black text-white tracking-widest uppercase opacity-60", children: "SBC Master V1.0.31" }),
+u$1("h2", { className: "text-xs font-black text-white tracking-widest uppercase opacity-60", children: "SBC Master V1.0.32" }),
 u$1("div", { className: "flex gap-2", children: [
 u$1(
                       "button",

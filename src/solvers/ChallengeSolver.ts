@@ -29,8 +29,8 @@ export class ChallengeSolver {
         index: s.index, pos: Utils.normalizePos(s.positionId || s.position?.id)
     }));
 
-    // --- TEMPLATE ENGINE ---
-    const solveTemplate = (lA: number, lB: number): EAItem[] | null => {
+    // --- UNIVERSAL ENGINE ---
+    const solveUniversal = (anchorLeagues: number[]): EAItem[] | null => {
         const selected: (EAItem | null)[] = new Array(activeSlots.length).fill(null);
         const usedIds = new Set<number>();
         const counts: any = { nation: new Map(), league: new Map(), club: new Map() };
@@ -41,9 +41,18 @@ export class ChallengeSolver {
             if (v <= 0) map.delete(key); else map.set(key, v);
         };
 
+        // SEED IDENTIFICATION
+        const isSeed = (p: EAItem) => {
+            return summary.specificConstraints.some(s => 
+                (s.type === 'club' && s.ids.includes(p.teamId!)) ||
+                (s.type === 'nation' && s.ids.includes(p.nationId!)) ||
+                (s.type === 'league' && s.ids.includes(p.leagueId!))
+            );
+        };
+
         const recurse = (idx: number): boolean => {
             iterations++;
-            if (iterations > 30000) return false;
+            if (iterations > 20000) return false;
 
             if (idx === activeSlots.length) {
                 const finalArr = new Array(23).fill(null);
@@ -55,22 +64,36 @@ export class ChallengeSolver {
                 let cf=0; rt.forEach(v=>{if(v>avg)cf+=(v-avg);});
                 const finalR = Math.floor((sum+cf)/11 + 0.0401);
 
-                return (finalC >= summary.minChem && finalR >= summary.minRating && counts.nation.size >= summary.minTotalNations);
+                if (finalR < summary.minRating || finalC < summary.minChem) return false;
+                if (counts.nation.size < summary.minTotalNations || counts.league.size < summary.minTotalLeagues) return false;
+                
+                for (const constraint of summary.specificConstraints) {
+                    const count = selected.filter(p => 
+                        (constraint.type === 'club' && constraint.ids.includes(p!.teamId!)) ||
+                        (constraint.type === 'nation' && constraint.ids.includes(p!.nationId!)) ||
+                        (constraint.type === 'league' && constraint.ids.includes(p!.leagueId!))
+                    ).length;
+                    if (count < constraint.count) return false;
+                }
+                return true;
             }
 
             const slot = activeSlots[idx];
             const candidates = pool.filter(p => {
                 if (usedIds.has(p.id) || Utils.normalizePos(p.preferredPosition) !== slot.pos) return false;
-                if (p.leagueId !== lA && p.leagueId !== lB) return false; 
+                const matchesLeagues = anchorLeagues.length === 0 || anchorLeagues.includes(p.leagueId!);
+                if (!matchesLeagues && !isSeed(p)) return false;
                 if (counts.nation.size >= 3 && !counts.nation.has(p.nationId)) return false;
                 if ((counts.club.get(p.teamId!)||0) >= summary.maxSameClub) return false;
                 return true;
             }).map(p => {
                 let score = 0;
+                if (isSeed(p)) score += 50000;
+                if (anchorLeagues.includes(p.leagueId!)) score += 10000;
                 if (counts.club.get(p.teamId!) === 1) score += 30000;
                 if (counts.nation.get(p.nationId!) === 1) score += 20000;
                 return { p, score };
-            }).sort((a,b) => b.score - a.score || (a.p.rating - b.p.rating)).slice(0, 12).map(c => c.p);
+            }).sort((a,b) => b.score - a.score || (a.p.rating - b.p.rating)).slice(0, 15).map(c => c.p);
 
             for (const p of candidates) {
                 selected[idx] = p; usedIds.add(p.id);
@@ -101,8 +124,6 @@ export class ChallengeSolver {
 
         while (changed) {
             changed = false;
-            
-            // Pass 1: Aggressive Solo Downgrade (Lowest Rating First)
             const sortedByRating = current.map((p, i) => ({ p, i })).sort((a, b) => b.p.rating - a.p.rating);
             for (const { p, i } of sortedByRating) {
                 const possible = pool.filter(cand => !current.some(ci => ci.id === cand.id) && cand.rating < p.rating && Utils.normalizePos(cand.preferredPosition) === Utils.normalizePos(p.preferredPosition)).sort((a,b) => a.rating - b.rating);
@@ -114,17 +135,13 @@ export class ChallengeSolver {
             }
             if (changed) continue;
 
-            // Pass 2: Pair-Wise Bridge (Swap 2 players to unlock rating drop)
-            // We look for a pair where one might go UP slightly but the other goes DOWN significantly
             for (let i = 0; i < current.length && !changed; i++) {
                 for (let j = 0; j < current.length && !changed; j++) {
                     if (i === j) continue;
                     const pI = current[i], pJ = current[j];
-                    if (pI.rating < 75 && pJ.rating < 75) continue; // Don't bridge low cards
-
+                    if (pI.rating < 75 && pJ.rating < 75) continue; 
                     const candidatesI = pool.filter(c => !current.some(ci => ci.id === c.id) && Utils.normalizePos(c.preferredPosition) === Utils.normalizePos(pI.preferredPosition)).slice(0, 10);
                     const candidatesJ = pool.filter(c => !current.some(ci => ci.id === c.id) && Utils.normalizePos(c.preferredPosition) === Utils.normalizePos(pJ.preferredPosition)).slice(0, 10);
-
                     for (const cI of candidatesI) {
                         for (const cJ of candidatesJ) {
                             if (cI.id === cJ.id || (cI.rating + cJ.rating >= pI.rating + pJ.rating)) continue;
@@ -143,23 +160,40 @@ export class ChallengeSolver {
         return current;
     };
 
-    // --- EXECUTION LOOP ---
+    // --- ADAPTIVE EXECUTION ---
     const leagues: Record<number, number> = {};
     pool.forEach(p => { if(!leagues[p.leagueId!]) leagues[p.leagueId!] = 0; leagues[p.leagueId!]++; });
-    const trialLeagues = Object.keys(leagues).filter(id => leagues[Number(id)] >= 5).sort((a,b) => leagues[Number(b)] - leagues[Number(a)]).map(Number).slice(0, 8);
+    const sortedLeagues = Object.keys(leagues).sort((a,b) => leagues[Number(b)] - leagues[Number(a)]).map(Number).slice(0, 10);
 
-    log(`Testing permutations of ${trialLeagues.length} major leagues...`);
-    for (let i=0; i<trialLeagues.length; i++) {
-        for (let j=i+1; j<trialLeagues.length; j++) {
-            log(`... trial: L${trialLeagues[i]} + L${trialLeagues[j]}`);
-            const res = solveTemplate(trialLeagues[i], trialLeagues[j]);
-            if (res) {
-                const optimized = optimizeFodder(res);
-                const finalArr = new Array(23).fill(null);
-                activeSlots.forEach((s: any, idx: number) => finalArr[s.index] = optimized[idx]);
-                squad.setPlayers(finalArr);
-                await Utils.saveSquad(challenge, squad, controller);
-                return log("✅ Optimized Architect Solution Applied!");
+    const leagueCountToTry = Math.max(2, summary.minTotalLeagues);
+    log(`Strategizing for ${leagueCountToTry} leagues with ${summary.specificConstraints.length} specific constraints...`);
+
+    if (summary.minChem < 15) {
+        log("Low Chem Detected: Using Wide-Pool mode.");
+        const res = solveUniversal([]); // No anchor leagues
+        if (res) {
+            const optimized = optimizeFodder(res);
+            const finalArr = new Array(23).fill(null);
+            activeSlots.forEach((s: any, idx: number) => finalArr[s.index] = optimized[idx]);
+            squad.setPlayers(finalArr);
+            await Utils.saveSquad(challenge, squad, controller);
+            return log("✅ Wide-Pool Solution Applied!");
+        }
+    } else {
+        // High Chem Template permutations
+        for (let i=0; i < sortedLeagues.length; i++) {
+            for (let j=i+1; j < sortedLeagues.length; j++) {
+                const anchors = [sortedLeagues[i], sortedLeagues[j]];
+                log(`... trial: L${anchors[0]} + L${anchors[1]}`);
+                const res = solveUniversal(anchors);
+                if (res) {
+                    const optimized = optimizeFodder(res);
+                    const finalArr = new Array(23).fill(null);
+                    activeSlots.forEach((s: any, idx: number) => finalArr[s.index] = optimized[idx]);
+                    squad.setPlayers(finalArr);
+                    await Utils.saveSquad(challenge, squad, controller);
+                    return log("✅ Adaptive Template Solution Applied!");
+                }
             }
         }
     }
